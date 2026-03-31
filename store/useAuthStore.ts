@@ -33,7 +33,7 @@ export const useAuthStore = create<AuthStore>()(
 
       login: (user, token) => {
         set({ user, token });
-        // Cookie তেও save করো middleware এর জন্য
+        // Cookie
         setCookie(
           "auth-storage",
           JSON.stringify({ state: { user, token } })

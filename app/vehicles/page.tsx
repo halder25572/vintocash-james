@@ -55,21 +55,50 @@ const VehiclesPage = () => {
     process.env.NEXT_PUBLIC_API_URL_DEAL ||
     "https://secondbackend.vintocash.com/api";
 
+  // useEffect(() => {
+  //   // Wait for token to load from localStorage
+  //   if (token !== null) {
+  //     fetchVehicles(currentPage);
+  //   }
+  // }, [currentPage, token]);
+
+  const [hydrated, setHydrated] = useState(false);
+
   useEffect(() => {
-    // Wait for token to load from localStorage
-    if (token !== null) {
-      fetchVehicles(currentPage);
+    // Zustand persist hydration
+    const unsub = useAuthStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    // Already hydrated
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true);
     }
-  }, [currentPage, token]);
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (token) {
+      fetchVehicles(currentPage);
+    } else {
+      setLoading(false);
+    }
+  }, [currentPage, token, hydrated]);
 
   const fetchVehicles = async (page: number = 1) => {
+    // if (!token) {
+    //   setLoading(false);
+    //   return;
+    // }
+
+    // setLoading(true);
+    // setError("");
     if (!token) {
       setLoading(false);
       return;
     }
-
     setLoading(true);
-    setError("");
+    setError(""); //
 
     try {
       const vehicleUrl = `${API_BASE_URL}/vehicle/data/index`;
@@ -84,8 +113,8 @@ const VehiclesPage = () => {
         },
         body: JSON.stringify({
           page: page,
-           per_page: 6,
-           status: "active",
+          per_page: 6,
+          status: "active",
           // Try without filters first
         }),
       });
