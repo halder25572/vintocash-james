@@ -5,18 +5,16 @@ import { useRouter } from "next/navigation";
 
 export default function VerifyPage() {
   const router = useRouter();
-  const [codes, setCodes] = useState(["", "", "", ""]);
+  const [codes, setCodes] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
-
-  const DEMO_CODE = ["4", "9", "7", "5"];
 
   const handleChange = (i: number, val: string) => {
     if (!/^\d*$/.test(val)) return;
     const next = [...codes];
     next[i] = val.slice(-1);
     setCodes(next);
-    if (val && i < 3) inputs.current[i + 1]?.focus();
+    if (val && i < 5) inputs.current[i + 1]?.focus();
   };
 
   const handleKeyDown = (i: number, e: React.KeyboardEvent) => {
@@ -26,10 +24,10 @@ export default function VerifyPage() {
   };
 
   const handleContinue = () => {
-    if (codes.join("") === DEMO_CODE.join("")) {
+    if (codes.join("").length === 6) {
       router.push("/dashboard");
     } else {
-      setError("Wrong code. Use: 4975");
+      setError("Please enter the 6-digit code.");
     }
   };
 
@@ -51,11 +49,11 @@ export default function VerifyPage() {
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 w-full">
         <h1 className="text-2xl font-bold text-gray-900 mb-1">Enter your code</h1>
         <p className="text-sm text-gray-400 mb-6">
-          Enter the 4-digit code we sent to your email.
+          Enter the 6-digit code we sent to your email.
         </p>
 
         {/* OTP Inputs */}
-        <div className="flex gap-3 justify-center mb-6">
+        <div className="flex gap-2 justify-center mb-6">
           {codes.map((c, i) => (
             <input
               key={i}
@@ -66,7 +64,7 @@ export default function VerifyPage() {
               value={c}
               onChange={(e) => handleChange(i, e.target.value)}
               onKeyDown={(e) => handleKeyDown(i, e)}
-              className="w-14 h-14 text-center text-xl font-bold border-2 border-gray-200 rounded-xl outline-none focus:border-[#D93E39] transition-colors text-gray-800"
+              className="w-10 h-12 sm:w-11 sm:h-14 text-center text-lg sm:text-xl font-bold border-2 border-gray-200 rounded-xl outline-none focus:border-[#D93E39] transition-colors text-gray-800"
             />
           ))}
         </div>
@@ -88,14 +86,9 @@ export default function VerifyPage() {
           For security, this code expires in 10 minutes.
         </p>
 
-        {/* Demo hint */}
-        <div className="mt-4 p-3 bg-gray-50 rounded-xl">
-          <p className="text-xs text-gray-500">Demo code: <span className="font-bold text-gray-700">4975</span></p>
-        </div>
-
         <p className="text-xs text-center text-gray-400 mt-4">
           Didn&apos;t receive a code?{" "}
-          <button className="text-[#D93E39] font-semibold hover:underline">
+          <button className="text-[#D93E39] cursor-pointer font-semibold hover:underline">
             Resend code
           </button>
         </p>

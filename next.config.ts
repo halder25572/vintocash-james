@@ -26,14 +26,18 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  async rewrites() {
-    return [
-      {
-        source: "/api/proxy/:path*",
-        destination: "https://backend.vintocash.com/api/:path*",
-      },
-    ];
-  },
+async rewrites() {
+  return [
+    {
+      source: "/api/proxy/:path*",
+      destination: "https://backend.vintocash.com/api/:path*",
+    },
+    {
+      source: "/api/deal/:path*",
+      destination: "https://secondbackend.vintocash.com/api/:path*",
+    },
+  ];
+},
 
   output: process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" ? "export" : undefined,
 

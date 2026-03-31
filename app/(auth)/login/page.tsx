@@ -6,10 +6,18 @@ import { Eye, EyeOff, User } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/useAuthStore";
 
-// Demo user
-const DEMO_USER = {
-  email: "daniel@vintocash.com",
-  password: "demo1234",
+type LoginApiResponse = {
+  status: boolean;
+  message: string;
+  data?: {
+    token: string;
+    user: {
+      id: number;
+      name: string | null;
+      email: string;
+      role?: string | null;
+    };
+  };
 };
 
 export default function LoginPage() {
@@ -21,41 +29,85 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-const handleLogin = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setError("");
-  setLoading(true);
+  const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL_DEAL ||
+    "https://secondbackend.vintocash.com/api";
 
-  await new Promise((r) => setTimeout(r, 600));
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
 
-  if (email === DEMO_USER.email && password === DEMO_USER.password) {
-    login(email, "Daniel");
-    setLoading(false);
-    router.replace("/dashboard");
-  } else {
-    setError("Invalid email or password. Try demo credentials.");
-    setLoading(false);
-  }
-};
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
 
-// const handleLogin = async (e: React.FormEvent) => {
-//   e.preventDefault();
-//   setError("");
-//   setLoading(true);
+    if (!trimmedEmail || !trimmedPassword) {
+      setError("Email and password are required.");
+      setLoading(false);
+      return;
+    }
 
-//   await new Promise((r) => setTimeout(r, 600));
+    try {
+      const loginUrl = `${API_BASE_URL}/user-login`;
+      console.log("📍 Attempting login to:", loginUrl);
+      console.log("📧 Email:", trimmedEmail);
 
-//   if (
-//     email === DEMO_USER.email &&
-//     password === DEMO_USER.password
-//   ) {
-//     localStorage.setItem("auth_user", JSON.stringify({ email, name: "Daniel" }));
-//     router.push("/dashboard");
-//   } else {
-//     setError("Invalid email or password. Try demo credentials.");
-//   }
-//   setLoading(false);
-// };
+      const response = await fetch(loginUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          password: trimmedPassword,
+        }),
+      });
+
+      console.log("🔗 Response Status:", response.status, response.statusText);
+
+      let result: LoginApiResponse;
+      try {
+        result = await response.json();
+      } catch (parseErr) {
+        console.error("❌ Failed to parse JSON:", parseErr);
+        setError("Server returned invalid response.");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📦 API Response:", result);
+
+      // Accept both ok response and custom status: true from API
+      if (!result.status || !result.data?.token || !result.data?.user) {
+        const errorMsg = result?.message || "Login failed. Please try again.";
+        console.error("❌ Login failed:", errorMsg);
+        setError(errorMsg);
+        setLoading(false);
+        return;
+      }
+
+      console.log("✅ Login successful. User:", result.data.user);
+
+      login(
+        {
+          id: result.data.user.id,
+          email: result.data.user.email,
+          name: result.data.user.name || result.data.user.email.split("@")[0] || "User",
+          role: result.data.user.role || undefined,
+        },
+        result.data.token
+      );
+
+      console.log("✅ Auth store updated. Redirecting...");
+      setLoading(false);
+      router.replace("/dashboard");
+    } catch (err) {
+      console.error("❌ Network/Catch error:", err);
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="w-full max-w-sm">
@@ -86,7 +138,7 @@ const handleLogin = async (e: React.FormEvent) => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="daniel@vintocash.com"
+                placeholder="you@example.com"
                 required
                 className="w-full border border-gray-200 rounded-xl px-4 py-2.5 pl-10 text-sm text-gray-800 outline-none focus:border-[#D93E39] transition-colors"
               />
@@ -109,7 +161,7 @@ const handleLogin = async (e: React.FormEvent) => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                className="absolute right-3 top-1/2 cursor-pointer -translate-y-1/2 text-gray-400"
               >
                 {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
@@ -127,7 +179,7 @@ const handleLogin = async (e: React.FormEvent) => {
           <div className="flex justify-end">
             <Link
               href="/forgot-password"
-              className="text-xs text-[#D93E39] hover:underline"
+              className="text-xs text-[#D93E39] cursor-pointer hover:underline"
             >
               Forgot Password ?
             </Link>
@@ -137,22 +189,15 @@ const handleLogin = async (e: React.FormEvent) => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-[#D93E39] hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-70"
+            className="w-full py-3 bg-[#D93E39] cursor-pointer hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-70"
           >
             {loading ? "Logging in..." : "Login"}
           </button>
         </form>
 
-        {/* Demo hint */}
-        <div className="mt-4 p-3 bg-gray-50 rounded-xl">
-          <p className="text-xs text-gray-500 font-medium mb-1">Demo Credentials:</p>
-          <p className="text-xs text-gray-600">Email: <span className="font-semibold">daniel@vintocash.com</span></p>
-          <p className="text-xs text-gray-600">Password: <span className="font-semibold">demo1234</span></p>
-        </div>
-
         <p className="text-xs text-center text-gray-400 mt-4">
           Don&apos;t have an account?{" "}
-          <Link href="#" className="text-[#D93E39] font-semibold hover:underline">
+          <Link href="#" className="text-[#D93E39] cursor-pointer font-semibold hover:underline">
             Register Here
           </Link>
         </p>

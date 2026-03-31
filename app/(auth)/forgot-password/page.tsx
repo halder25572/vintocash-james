@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation";
 import { User } from "lucide-react";
 import Link from "next/link";
 
-const DEMO_EMAIL = "daniel@vintocash.com";
-
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -20,13 +18,8 @@ export default function ForgotPasswordPage() {
 
     await new Promise((r) => setTimeout(r, 700));
 
-    if (email === DEMO_EMAIL) {
-      // Email match — verify page
-      localStorage.setItem("reset_email", email);
-      router.push("/verify-reset");
-    } else {
-      setError("No account found with this email.");
-    }
+    localStorage.setItem("reset_email", email);
+    router.push("/verify-reset");
     setLoading(false);
   };
 
@@ -61,7 +54,7 @@ export default function ForgotPasswordPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="daniel@vintocash.com"
+                placeholder="you@example.com"
                 required
                 className="w-full border border-gray-200 rounded-xl px-4 py-2.5 pl-10 text-sm text-gray-800 outline-none focus:border-[#D93E39] transition-colors"
               />
@@ -75,20 +68,10 @@ export default function ForgotPasswordPage() {
             </p>
           )}
 
-          {/* Demo hint */}
-          <div className="p-3 bg-gray-50 rounded-xl">
-            <p className="text-xs text-gray-500">
-              Demo email:{" "}
-              <span className="font-semibold text-gray-700">
-                daniel@vintocash.com
-              </span>
-            </p>
-          </div>
-
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-[#D93E39] hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-70"
+            className="w-full py-3 bg-[#D93E39] cursor-pointer hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-70"
           >
             {loading ? "Sending code..." : "Send Reset Code"}
           </button>
@@ -96,7 +79,7 @@ export default function ForgotPasswordPage() {
 
         <p className="text-xs text-center text-gray-400 mt-4">
           Remember your password?{" "}
-          <Link href="/login" className="text-[#D93E39] font-semibold hover:underline">
+          <Link href="/login" className="text-[#D93E39] cursor-pointer font-semibold hover:underline">
             Back to Login
           </Link>
         </p>

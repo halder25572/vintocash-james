@@ -146,7 +146,7 @@ export default async function Footer() {
         <div className="mt-12 pt-8 border-t border-gray-800">
           <div className="flex flex-col items-center justify-between gap-4 text-sm md:flex-row">
             <p className="text-gray-500">
-              demore@vintocash.com
+              support@vintocash.com
             </p>
 
             <div className="flex flex-wrap justify-center gap-6 text-gray-500">

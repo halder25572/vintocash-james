@@ -71,7 +71,7 @@ export default function Navbar() {
               onMouseLeave={() => setDropdownOpen(false)}
             >
               <button
-                className={`flex items-center gap-1 text-[16px] font-medium transition-colors ${
+                className={`flex items-center cursor-pointer gap-1 text-[16px] font-medium transition-colors ${
                   isActive("/dealers") 
                     ? "text-[#D93E39] font-semibold" 
                     : "text-[#6D717F] hover:text-gray-900"
@@ -111,10 +111,10 @@ export default function Navbar() {
             <Button
               asChild
               size="lg"
-              className="bg-[#D93E39] px-6 py-5 text-base font-medium rounded-full shadow-md transition-all"
+              className="bg-[#D93E39] cursor-pointer px-6 py-5 text-base font-medium rounded-full shadow-md transition-all"
             >
               <Link href="/getAOffer">Get A Offer</Link>
-            </Button>
+            </Button> 
           </div>
         </div>
 

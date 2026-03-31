@@ -1,9 +1,17 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
+type AuthUser = {
+  id?: number;
+  email: string;
+  name: string;
+  role?: string;
+};
+
 interface AuthStore {
-  user: { email: string; name: string } | null;
-  login: (email: string, name: string) => void;
+  user: AuthUser | null;
+  token: string | null;
+  login: (user: AuthUser, token: string) => void;
   logout: () => void;
   isAuthenticated: () => boolean;
 }
@@ -21,18 +29,19 @@ export const useAuthStore = create<AuthStore>()(
   persist(
     (set, get) => ({
       user: null,
+      token: null,
 
-      login: (email, name) => {
-        set({ user: { email, name } });
+      login: (user, token) => {
+        set({ user, token });
         // Cookie তেও save করো middleware এর জন্য
         setCookie(
           "auth-storage",
-          JSON.stringify({ state: { user: { email, name } } })
+          JSON.stringify({ state: { user, token } })
         );
       },
 
       logout: () => {
-        set({ user: null });
+        set({ user: null, token: null });
         deleteCookie("auth-storage");
       },
 
