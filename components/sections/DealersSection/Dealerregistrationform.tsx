@@ -1,20 +1,32 @@
 "use client";
 
 import { useForm, Controller } from "react-hook-form";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type ContactMethod = "phone" | "text" | "email";
 
-type VehicleCategory =
-  | "cars"
-  | "dieselTrucks"
-  | "trailers"
-  | "trucks"
-  | "motorcycles"
-  | "commercialVehicles"
-  | "suvs"
-  | "campersRVs"
-  | "workTrucks";
+type VehicleCategory = {
+  id: number;
+  category_name: string;
+  status: string;
+};
+
+type PriceRange = {
+  id: number;
+  min_price: number;
+  max_price: number;
+};
+
+type BuyingVolume = {
+  id: number;
+  min_volume: number;
+  max_volume: number;
+};
+
+type MileagePreference = {
+  id: number;
+  mileage: string;
+};
 
 type FormData = {
   dealershipName: string;
@@ -26,7 +38,7 @@ type FormData = {
   licenseNumber: string;
   websiteUrl: string;
   bestContactMethod: ContactMethod;
-  vehicleCategories: VehicleCategory[];
+  vehicleCategories: number[];
   priceRange: string;
   mileagePreference: string;
   titleTolerance: string;
@@ -34,53 +46,113 @@ type FormData = {
   additionalNotes: string;
 };
 
-const vehicleCategoryOptions: { value: VehicleCategory; label: string }[] = [
-  { value: "cars", label: "Cars" },
-  { value: "trucks", label: "Trucks" },
-  { value: "suvs", label: "SUVs" },
-  { value: "dieselTrucks", label: "Diesel Trucks" },
-  { value: "motorcycles", label: "Motorcycles" },
-  { value: "campersRVs", label: "Campers/RVs" },
-  { value: "trailers", label: "Trailers" },
-  { value: "commercialVehicles", label: "Commercial Vehicles" },
-  { value: "workTrucks", label: "Work Trucks" },
-];
-
-const priceRangeOptions = [
-  "Up to $20k",
-  "$20k - $40k",
-  "$40k - $60k",
-  "$60k - $80k",
-  "$80k+",
-];
-
-const mileageOptions = [
-  "Under 50k",
-  "50k - 100k",
-  "100k - 150k",
-  "150k+",
-  "Any Mileage",
-];
-
 const titleToleranceOptions = [
-  "Clean Only",
-  "Clean or Salvage",
-  "Any Title",
-  "Rebuilt Accepted",
-];
-
-const buyingVolumeOptions = [
-  "1-5 units/mo",
-  "6-10 units/mo",
-  "11-20 units/mo",
-  "21-50 units/mo",
-  "50+ units/mo",
+  { id: 1, label: "Clean Only" },
+  { id: 2, label: "Clean or Salvage" },
+  { id: 3, label: "Any Title" },
+  { id: 4, label: "Rebuilt Accepted" },
 ];
 
 export default function DealerRegistrationForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [vehicleCategories, setVehicleCategories] = useState<VehicleCategory[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [priceRanges, setPriceRanges] = useState<PriceRange[]>([]);
+  const [priceRangesLoading, setPriceRangesLoading] = useState(true);
+  const [buyingVolumes, setBuyingVolumes] = useState<BuyingVolume[]>([]);
+  const [buyingVolumesLoading, setBuyingVolumesLoading] = useState(true);
+  const [mileagePreferences, setMileagePreferences] = useState<MileagePreference[]>([]);
+  const [mileagePreferencesLoading, setMileagePreferencesLoading] = useState(true);
+
+  // Fetch all dropdown data from API
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/category`
+        );
+        const result = await response.json();
+        if (result.success && Array.isArray(result.data)) {
+          setVehicleCategories(result.data.filter((cat: VehicleCategory) => cat.status === "active"));
+        }
+      } catch (error) {
+        console.error("Failed to fetch vehicle categories:", error);
+      } finally {
+        setCategoriesLoading(false);
+      }
+    };
+
+    const fetchPriceRanges = async () => {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/pricerange`
+        );
+        const result = await response.json();
+        if (result.success && Array.isArray(result.data)) {
+          setPriceRanges(result.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch price ranges:", error);
+      } finally {
+        setPriceRangesLoading(false);
+      }
+    };
+
+    const fetchBuyingVolumes = async () => {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/buyingvolume`
+        );
+        const result = await response.json();
+        if (result.success && Array.isArray(result.data)) {
+          setBuyingVolumes(result.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch buying volumes:", error);
+      } finally {
+        setBuyingVolumesLoading(false);
+      }
+    };
+
+    const fetchMileagePreferences = async () => {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/mileagepreference`
+        );
+        const result = await response.json();
+        if (result.success && Array.isArray(result.data)) {
+          setMileagePreferences(result.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch mileage preferences:", error);
+      } finally {
+        setMileagePreferencesLoading(false);
+      }
+    };
+
+    fetchCategories();
+    fetchPriceRanges();
+    fetchBuyingVolumes();
+    fetchMileagePreferences();
+  }, []);
+
+  // Helper to format price range label
+  const formatPriceRange = (range: PriceRange) => {
+    const formatPrice = (price: number) => {
+      if (price >= 1000) {
+        return `$${(price / 1000).toFixed(0)}k`;
+      }
+      return `$${price}`;
+    };
+    return `${formatPrice(range.min_price)} - ${formatPrice(range.max_price)}`;
+  };
+
+  // Helper to format buying volume label
+  const formatBuyingVolume = (volume: BuyingVolume) => {
+    return `${volume.min_volume}-${volume.max_volume} units/mo`;
+  };
 
   const {
     register,
@@ -88,54 +160,87 @@ export default function DealerRegistrationForm() {
     control,
     formState: { errors },
     reset,
+    setValue,
   } = useForm<FormData>({
     defaultValues: {
       bestContactMethod: "phone",
       vehicleCategories: [],
-      priceRange: "Up to $20k",
-      mileagePreference: "Under 50k",
-      titleTolerance: "Clean Only",
-      buyingVolume: "1-5 units/mo",
+      priceRange: "",
+      mileagePreference: "",
+      titleTolerance: "1",
+      buyingVolume: "",
     },
   });
 
-  // const onSubmit = async (data: FormData) => {
-  //   setIsSubmitting(true);
-  //   setSubmitError(null);
+  // Set default values when API data loads
+  useEffect(() => {
+    if (priceRanges.length > 0) {
+      setValue("priceRange", String(priceRanges[0].id));
+    }
+  }, [priceRanges, setValue]);
 
-  //   try {
-  //     const response = await fetch("/api/dealer-registration", {
-  //       method: "POST",
-  //       headers: { "Content-Type": "application/json" },
-  //       body: JSON.stringify(data),
-  //     });
+  useEffect(() => {
+    if (mileagePreferences.length > 0) {
+      setValue("mileagePreference", String(mileagePreferences[0].id));
+    }
+  }, [mileagePreferences, setValue]);
 
-  //     if (!response.ok) {
-  //       const errorData = await response.json().catch(() => ({}));
-  //       throw new Error(errorData?.message || "Submission failed. Please try again.");
-  //     }
-
-  //     reset();
-  //     setShowModal(true);
-  //   } catch (error: unknown) {
-  //     setSubmitError(
-  //       error instanceof Error ? error.message : "An unexpected error occurred."
-  //     );
-  //   } finally {
-  //     setIsSubmitting(false);
-  //   }
-  // };
+  useEffect(() => {
+    if (buyingVolumes.length > 0) {
+      setValue("buyingVolume", String(buyingVolumes[0].id));
+    }
+  }, [buyingVolumes, setValue]);
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
+    setSubmitError(null);
 
-    // Simulate short delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      // Map form data to API payload
+      const payload = {
+        dealership_name: data.dealershipName,
+        contact_name: data.contactName,
+        email: data.emailAddress,
+        contact_number: data.phoneNumber,
+        website_url: data.websiteUrl || null,
+        city: data.city,
+        state: data.state,
+        best_contact_method: data.bestContactMethod,
+        additional_notes: data.additionalNotes || null,
+        license_number: data.licenseNumber,
+        price_range_id: parseInt(data.priceRange),
+        buying_volume_id: parseInt(data.buyingVolume),
+        mileage_preference_id: parseInt(data.mileagePreference),
+        title_situation_id: parseInt(data.titleTolerance),
+        categories: data.vehicleCategories,
+      };
 
-    console.log("Form Data:", data);
-    reset();
-    setShowModal(true);
-    setIsSubmitting(false);
+      console.log("Submitting payload:", payload);
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/info/store`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.status) {
+        throw new Error(result?.message || "Submission failed. Please try again.");
+      }
+
+      reset();
+      setShowModal(true);
+    } catch (error: unknown) {
+      setSubmitError(
+        error instanceof Error ? error.message : "An unexpected error occurred."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
 
@@ -399,24 +504,30 @@ export default function DealerRegistrationForm() {
               control={control}
               render={({ field }) => (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-2.5 gap-x-4">
-                  {vehicleCategoryOptions.map(({ value, label }) => (
-                    <label key={value} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        value={value}
-                        checked={field.value.includes(value)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            field.onChange([...field.value, value]);
-                          } else {
-                            field.onChange(field.value.filter((v) => v !== value));
-                          }
-                        }}
-                        className="w-4 h-4 accent-[#D93E39] rounded"
-                      />
-                      <span className="text-sm text-gray-700">{label}</span>
-                    </label>
-                  ))}
+                  {categoriesLoading ? (
+                    <span className="text-sm text-gray-500">Loading categories...</span>
+                  ) : vehicleCategories.length === 0 ? (
+                    <span className="text-sm text-gray-500">No categories available</span>
+                  ) : (
+                    vehicleCategories.map((category) => (
+                      <label key={category.id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          value={category.id}
+                          checked={field.value.includes(category.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              field.onChange([...field.value, category.id]);
+                            } else {
+                              field.onChange(field.value.filter((v) => v !== category.id));
+                            }
+                          }}
+                          className="w-4 h-4 accent-[#D93E39] rounded"
+                        />
+                        <span className="text-sm text-gray-700">{category.category_name}</span>
+                      </label>
+                    ))
+                  )}
                 </div>
               )}
             />
@@ -431,10 +542,19 @@ export default function DealerRegistrationForm() {
               <select
                 {...register("priceRange")}
                 className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 transition appearance-none cursor-pointer"
+                disabled={priceRangesLoading}
               >
-                {priceRangeOptions.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
+                {priceRangesLoading ? (
+                  <option value="">Loading...</option>
+                ) : priceRanges.length === 0 ? (
+                  <option value="">No options available</option>
+                ) : (
+                  priceRanges.map((range) => (
+                    <option key={range.id} value={range.id}>
+                      {formatPriceRange(range)}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
             <div>
@@ -444,10 +564,19 @@ export default function DealerRegistrationForm() {
               <select
                 {...register("mileagePreference")}
                 className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 transition appearance-none cursor-pointer"
+                disabled={mileagePreferencesLoading}
               >
-                {mileageOptions.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
+                {mileagePreferencesLoading ? (
+                  <option value="">Loading...</option>
+                ) : mileagePreferences.length === 0 ? (
+                  <option value="">No options available</option>
+                ) : (
+                  mileagePreferences.map((pref) => (
+                    <option key={pref.id} value={pref.id}>
+                      {pref.mileage} miles
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -463,7 +592,7 @@ export default function DealerRegistrationForm() {
                 className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 transition appearance-none cursor-pointer"
               >
                 {titleToleranceOptions.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
+                  <option key={opt.id} value={opt.id}>{opt.label}</option>
                 ))}
               </select>
             </div>
@@ -474,10 +603,19 @@ export default function DealerRegistrationForm() {
               <select
                 {...register("buyingVolume")}
                 className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 transition appearance-none cursor-pointer"
+                disabled={buyingVolumesLoading}
               >
-                {buyingVolumeOptions.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
+                {buyingVolumesLoading ? (
+                  <option value="">Loading...</option>
+                ) : buyingVolumes.length === 0 ? (
+                  <option value="">No options available</option>
+                ) : (
+                  buyingVolumes.map((volume) => (
+                    <option key={volume.id} value={volume.id}>
+                      {formatBuyingVolume(volume)}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
