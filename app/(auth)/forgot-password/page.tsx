@@ -5,22 +5,92 @@ import { useRouter } from "next/navigation";
 import { User } from "lucide-react";
 import Link from "next/link";
 
+type ForgotPasswordApiResponse = {
+  status: boolean;
+  message: string;
+  data?: unknown;
+};
+
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL_DEAL ||
+    "https://secondbackend.vintocash.com/api";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
     setLoading(true);
 
-    await new Promise((r) => setTimeout(r, 700));
+    const trimmedEmail = email.trim();
 
-    localStorage.setItem("reset_email", email);
-    router.push("/verify-reset");
-    setLoading(false);
+    if (!trimmedEmail) {
+      setError("Email is required.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const forgotPasswordUrl = `${API_BASE_URL}/forget/password`;
+      console.log("📍 Attempting forgot password to:", forgotPasswordUrl);
+      console.log("📧 Email:", trimmedEmail);
+
+      const response = await fetch(forgotPasswordUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          email: trimmedEmail,
+        }),
+      });
+
+      console.log("🔗 Response Status:", response.status, response.statusText);
+
+      let result: ForgotPasswordApiResponse;
+      try {
+        result = await response.json();
+      } catch (parseErr) {
+        console.error("❌ Failed to parse JSON:", parseErr);
+        setError("Server returned invalid response.");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📦 API Response:", result);
+
+      if (!result.status) {
+        const errorMsg = result?.message || "Failed to send reset code. Please try again.";
+        console.error("❌ Forgot password failed:", errorMsg);
+        setError(errorMsg);
+        setLoading(false);
+        return;
+      }
+
+      console.log("✅ Forgot password successful");
+      setSuccess(result.message || "Reset code sent successfully! Check your email.");
+      
+      // Store email for verification page if needed
+      localStorage.setItem("reset_email", trimmedEmail);
+      
+      // Redirect to verify-reset page after 2 seconds
+      setTimeout(() => {
+        router.push("/verify-reset");
+      }, 2000);
+      
+      setLoading(false);
+    } catch (err) {
+      console.error("❌ Network/Catch error:", err);
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
   };
 
   return (
@@ -65,6 +135,12 @@ export default function ForgotPasswordPage() {
           {error && (
             <p className="text-xs text-[#D93E39] bg-red-50 px-3 py-2 rounded-xl">
               {error}
+            </p>
+          )}
+
+          {success && (
+            <p className="text-xs text-green-600 bg-green-50 px-3 py-2 rounded-xl">
+              {success}
             </p>
           )}
 

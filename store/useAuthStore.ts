@@ -40,7 +40,30 @@ export const useAuthStore = create<AuthStore>()(
         );
       },
 
-      logout: () => {
+      logout: async () => {
+        const token = get().token;
+        
+        // Call logout API
+        if (token) {
+          try {
+            const API_BASE_URL =
+              process.env.NEXT_PUBLIC_API_URL_DEAL ||
+              "https://secondbackend.vintocash.com/api";
+            
+            await fetch(`${API_BASE_URL}/user-logout`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+            });
+          } catch (error) {
+            console.error("Logout API error:", error);
+          }
+        }
+        
+        // Clear local state regardless of API result
         set({ user: null, token: null });
         deleteCookie("auth-storage");
       },

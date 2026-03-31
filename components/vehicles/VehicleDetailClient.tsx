@@ -4,13 +4,28 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
+import { useAuthStore } from "@/store/useAuthStore";
 import type { Vehicle } from "@/types";
 import clsx from "clsx";
+
+type PlaceBidResponse = {
+  status: boolean;
+  message: string;
+  data?: unknown;
+};
 
 export default function VehicleDetailClient({ vehicle }: { vehicle: Vehicle }) {
   const router = useRouter();
   const [selectedImg, setSelectedImg] = useState(0);
   const [bidAmount, setBidAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const token = useAuthStore((state) => state.token);
+
+  const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL_DEAL ||
+    "https://secondbackend.vintocash.com/api";
 
   const images = vehicle.images?.length ? vehicle.images : [vehicle.image];
 
@@ -27,6 +42,78 @@ export default function VehicleDetailClient({ vehicle }: { vehicle: Vehicle }) {
     setSelectedImg((prev) => (prev - 1 + images.length) % images.length);
   const nextImg = () =>
     setSelectedImg((prev) => (prev + 1) % images.length);
+
+  const handlePlaceBid = async () => {
+    setError("");
+    setSuccess("");
+
+    if (!bidAmount || parseFloat(bidAmount) <= 0) {
+      setError("Please enter a valid bid amount.");
+      return;
+    }
+
+    if (!token) {
+      setError("Please login to place a bid.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const bidUrl = `${API_BASE_URL}/vehicle/bid/place`;
+      console.log("📍 Placing bid to:", bidUrl);
+
+      const response = await fetch(bidUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          vehicle_id: vehicle.id,
+          bid_amount: parseFloat(bidAmount),
+        }),
+      });
+
+      console.log("🔗 Response Status:", response.status, response.statusText);
+
+      let result: PlaceBidResponse;
+      try {
+        result = await response.json();
+      } catch (parseErr) {
+        console.error("❌ Failed to parse JSON:", parseErr);
+        setError("Server returned invalid response.");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📦 API Response:", result);
+
+      if (!result.status) {
+        const errorMsg = result?.message || "Failed to place bid. Please try again.";
+        console.error("❌ Place bid failed:", errorMsg);
+        setError(errorMsg);
+        setLoading(false);
+        return;
+      }
+
+      console.log("✅ Bid placed successfully");
+      setSuccess(result.message || "Bid placed successfully!");
+      setBidAmount("");
+      
+      // Redirect to my bids page after 2 seconds
+      setTimeout(() => {
+        router.push("/my-bids");
+      }, 2000);
+
+      setLoading(false);
+    } catch (err) {
+      console.error("❌ Network/Catch error:", err);
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
+  };
 
   return (
     <div>
@@ -234,9 +321,26 @@ export default function VehicleDetailClient({ vehicle }: { vehicle: Vehicle }) {
               ))}
             </div>
 
+            {/* Error/Success Messages */}
+            {error && (
+              <p className="text-xs text-red-500 bg-red-50 px-3 py-2 rounded-xl">
+                {error}
+              </p>
+            )}
+
+            {success && (
+              <p className="text-xs text-green-600 bg-green-50 px-3 py-2 rounded-xl">
+                {success}
+              </p>
+            )}
+
             {/* Place Bid Button */}
-            <button className="w-full py-3 cursor-pointer rounded-xl bg-[#D93E39] text-white text-sm font-bold transition-colors hover:bg-red-600">
-              Place Bid
+            <button 
+              onClick={handlePlaceBid}
+              disabled={loading}
+              className="w-full py-3 cursor-pointer rounded-xl bg-[#D93E39] text-white text-sm font-bold transition-colors hover:bg-red-600 disabled:opacity-70"
+            >
+              {loading ? "Placing Bid..." : "Place Bid"}
             </button>
 
             <button

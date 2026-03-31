@@ -3,14 +3,29 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+type ResetPasswordApiResponse = {
+  status: boolean;
+  message: string;
+  data?: unknown;
+};
+
 export default function NewPasswordPage() {
   const router = useRouter();
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL_DEAL ||
+    "https://secondbackend.vintocash.com/api";
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+    setSuccess("");
+
     if (newPass.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
@@ -19,7 +34,90 @@ export default function NewPasswordPage() {
       setError("Passwords do not match.");
       return;
     }
-    router.push("/dashboard");
+
+    setLoading(true);
+
+    const email =
+      typeof window !== "undefined"
+        ? localStorage.getItem("reset_email")
+        : null;
+
+    const resetToken =
+      typeof window !== "undefined"
+        ? localStorage.getItem("reset_password_token")
+        : null;
+
+    if (!email) {
+      setError("Email not found. Please start from forgot password page.");
+      setLoading(false);
+      return;
+    }
+
+    if (!resetToken) {
+      setError("Reset token not found. Please verify OTP first.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const resetPasswordUrl = `${API_BASE_URL}/reset/password`;
+      console.log("📍 Attempting reset password to:", resetPasswordUrl);
+      console.log("📧 Email:", email);
+
+      const response = await fetch(resetPasswordUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          email: email,
+          reset_password_token: resetToken,
+          password: newPass,
+          password_confirmation: confirmPass,
+        }),
+      });
+
+      console.log("🔗 Response Status:", response.status, response.statusText);
+
+      let result: ResetPasswordApiResponse;
+      try {
+        result = await response.json();
+      } catch (parseErr) {
+        console.error("❌ Failed to parse JSON:", parseErr);
+        setError("Server returned invalid response.");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📦 API Response:", result);
+
+      if (!result.status) {
+        const errorMsg = result?.message || "Failed to reset password. Please try again.";
+        console.error("❌ Reset password failed:", errorMsg);
+        setError(errorMsg);
+        setLoading(false);
+        return;
+      }
+
+      console.log("✅ Password reset successful");
+      setSuccess(result.message || "Password reset successfully!");
+
+      // Clear localStorage
+      localStorage.removeItem("reset_email");
+      localStorage.removeItem("reset_password_token");
+
+      // Redirect to login page after 2 seconds
+      setTimeout(() => {
+        router.push("/login");
+      }, 2000);
+
+      setLoading(false);
+    } catch (err) {
+      console.error("❌ Network/Catch error:", err);
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
   };
 
   return (
@@ -75,11 +173,18 @@ export default function NewPasswordPage() {
             </p>
           )}
 
+          {success && (
+            <p className="text-xs text-green-600 bg-green-50 px-3 py-2 rounded-xl">
+              {success}
+            </p>
+          )}
+
           <button
             type="submit"
-            className="w-full py-3 bg-[#D93E39] hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors"
+            disabled={loading}
+            className="w-full py-3 bg-[#D93E39] hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-70"
           >
-            Save and continue
+            {loading ? "Resetting..." : "Save and continue"}
           </button>
         </form>
       </div>

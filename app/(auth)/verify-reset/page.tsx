@@ -3,11 +3,37 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
+type OtpVerifyApiResponse = {
+  status: boolean;
+  message: string;
+  data?: {
+    id: number;
+    name: string;
+    email: string;
+    reset_password_token: string;
+    reset_password_token_expires_at: string;
+    [key: string]: unknown;
+  };
+};
+
+type ResendOtpApiResponse = {
+  status: boolean;
+  message: string;
+  data?: unknown;
+};
+
 export default function VerifyResetPage() {
   const router = useRouter();
   const [codes, setCodes] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const API_BASE_URL =
+    process.env.NEXT_PUBLIC_API_URL_DEAL ||
+    "https://secondbackend.vintocash.com/api";
 
   const handleChange = (i: number, val: string) => {
     if (!/^\d*$/.test(val)) return;
@@ -23,11 +49,156 @@ export default function VerifyResetPage() {
     }
   };
 
-  const handleContinue = () => {
-    if (codes.join("").length === 6) {
-      router.push("/new-password");
-    } else {
+  const handleContinue = async () => {
+    const otp = codes.join("");
+    
+    if (otp.length !== 6) {
       setError("Please enter the 6-digit code.");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setLoading(true);
+
+    const email =
+      typeof window !== "undefined"
+        ? localStorage.getItem("reset_email")
+        : null;
+
+    if (!email) {
+      setError("Email not found. Please start from forgot password page.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const otpCheckUrl = `${API_BASE_URL}/otp/check`;
+      console.log("📍 Attempting OTP verification to:", otpCheckUrl);
+      console.log("📧 Email:", email);
+      console.log("🔢 OTP:", otp);
+
+      const response = await fetch(otpCheckUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          email: email,
+          otp: otp,
+        }),
+      });
+
+      console.log("🔗 Response Status:", response.status, response.statusText);
+
+      let result: OtpVerifyApiResponse;
+      try {
+        result = await response.json();
+      } catch (parseErr) {
+        console.error("❌ Failed to parse JSON:", parseErr);
+        setError("Server returned invalid response.");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📦 API Response:", result);
+
+      if (!result.status) {
+        const errorMsg = result?.message || "Invalid OTP. Please try again.";
+        console.error("❌ OTP verification failed:", errorMsg);
+        setError(errorMsg);
+        setLoading(false);
+        return;
+      }
+
+      console.log("✅ OTP verified successfully");
+      setSuccess(result.message || "OTP verified successfully!");
+
+      // Store reset token for new password page
+      if (result.data?.reset_password_token) {
+        localStorage.setItem("reset_password_token", result.data.reset_password_token);
+      }
+
+      // Redirect to new password page after 1 second
+      setTimeout(() => {
+        router.push("/new-password");
+      }, 1000);
+
+      setLoading(false);
+    } catch (err) {
+      console.error("❌ Network/Catch error:", err);
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError("");
+    setSuccess("");
+    setResending(true);
+
+    const email =
+      typeof window !== "undefined"
+        ? localStorage.getItem("reset_email")
+        : null;
+
+    if (!email) {
+      setError("Email not found. Please start from forgot password page.");
+      setResending(false);
+      return;
+    }
+
+    try {
+      const resendOtpUrl = `${API_BASE_URL}/resend/otp`;
+      console.log("📍 Attempting resend OTP to:", resendOtpUrl);
+      console.log("📧 Email:", email);
+
+      const response = await fetch(resendOtpUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          email: email,
+        }),
+      });
+
+      console.log("🔗 Response Status:", response.status, response.statusText);
+
+      let result: ResendOtpApiResponse;
+      try {
+        result = await response.json();
+      } catch (parseErr) {
+        console.error("❌ Failed to parse JSON:", parseErr);
+        setError("Server returned invalid response.");
+        setResending(false);
+        return;
+      }
+
+      console.log("📦 API Response:", result);
+
+      if (!result.status) {
+        const errorMsg = result?.message || "Failed to resend OTP. Please try again.";
+        console.error("❌ Resend OTP failed:", errorMsg);
+        setError(errorMsg);
+        setResending(false);
+        return;
+      }
+
+      console.log("✅ OTP resent successfully");
+      setSuccess(result.message || "OTP resent successfully! Check your email.");
+      
+      // Clear the OTP inputs
+      setCodes(["", "", "", "", "", ""]);
+      inputs.current[0]?.focus();
+      
+      setResending(false);
+    } catch (err) {
+      console.error("❌ Network/Catch error:", err);
+      setError("Network error. Please try again.");
+      setResending(false);
     }
   };
 
@@ -81,11 +252,18 @@ export default function VerifyResetPage() {
           </p>
         )}
 
+        {success && (
+          <p className="text-xs text-green-600 bg-green-50 px-3 py-2 rounded-xl mb-4 text-center">
+            {success}
+          </p>
+        )}
+
         <button
           onClick={handleContinue}
-          className="w-full py-3 bg-[#D93E39] hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors mb-4"
+          disabled={loading}
+          className="w-full py-3 bg-[#D93E39] hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-colors mb-4 disabled:opacity-70"
         >
-          Continue
+          {loading ? "Verifying..." : "Continue"}
         </button>
 
         <p className="text-xs text-center text-gray-400">
@@ -94,8 +272,12 @@ export default function VerifyResetPage() {
 
         <p className="text-xs text-center text-gray-400 mt-4">
           Didn&apos;t receive a code?{" "}
-          <button className="text-[#D93E39] cursor-pointer font-semibold hover:underline">
-            Resend code
+          <button 
+            onClick={handleResendOtp}
+            disabled={resending}
+            className="text-[#D93E39] cursor-pointer font-semibold hover:underline disabled:opacity-50"
+          >
+            {resending ? "Resending..." : "Resend code"}
           </button>
         </p>
       </div>

@@ -3,7 +3,8 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/useAuthStore";
 import {
   LayoutDashboard,
   Car,
@@ -29,7 +30,14 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const logout = useAuthStore((state) => state.logout);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleLogout = async () => {
+    await logout();
+    router.push("/login");
+  };
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-[#F9FAFB] border-r border-gray-300">
@@ -112,7 +120,10 @@ export default function Sidebar() {
 
       {/* Logout */}
       <div className="px-3 pb-6 pt-2">
-        <button className="flex cursor-pointer items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-500 hover:bg-red-50 hover:text-red-500 w-full transition-all duration-150 group">
+        <button 
+          onClick={handleLogout}
+          className="flex cursor-pointer items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-500 hover:bg-red-50 hover:text-red-500 w-full transition-all duration-150 group"
+        >
           <LogOut
             size={18}
             className="text-gray-400 group-hover:text-red-500 transition-colors"

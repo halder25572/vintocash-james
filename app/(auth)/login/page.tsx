@@ -197,7 +197,7 @@ export default function LoginPage() {
 
         <p className="text-xs text-center text-gray-400 mt-4">
           Don&apos;t have an account?{" "}
-          <Link href="#" className="text-[#D93E39] cursor-pointer font-semibold hover:underline">
+          <Link href="/dealers" className="text-[#D93E39] cursor-pointer font-semibold hover:underline">
             Register Here
           </Link>
         </p>
