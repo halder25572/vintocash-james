@@ -153,28 +153,52 @@ const VehiclesPage = () => {
           ? v.images.map(img => typeof img === 'string' ? img : img.url)
           : [];
 
+        // return {
+        //   id: v.id.toString(),
+        //   name: v.name,
+        //   price: parseFloat(v.price),
+        //   mileage: parseInt(v.mileage || "0"),
+        //   condition: v.condition as Vehicle["condition"],
+        //   location: v.location,
+        //   image: imageUrls.length > 0 ? imageUrls[0] : "/images/placeholder-car.jpg",
+        //   images: imageUrls,
+        //   description: v.description,
+        //   specs: {
+        //     year: v.year.toString(),
+        //     make: v.make,
+        //     model: v.model,
+        //     trim: v.trim,
+        //     fuelType: v.fuel_type,
+        //     transmission: v.transmission,
+        //     drivetrain: v.drivetrain,
+        //     exteriorColor: v.color,
+        //   },
+        //   estimatedValue: parseFloat(v.price),
+        //   currentHighBid: v.max_bid_amount,
+        // };
+
         return {
           id: v.id.toString(),
-          name: v.name,
-          price: parseFloat(v.price),
+          name: v.name || "",
+          price: parseFloat(v.price || "0"),
           mileage: parseInt(v.mileage || "0"),
-          condition: v.condition as Vehicle["condition"],
-          location: v.location,
+          condition: (v.condition || "Good") as Vehicle["condition"],
+          location: v.location || "",
           image: imageUrls.length > 0 ? imageUrls[0] : "/images/placeholder-car.jpg",
           images: imageUrls,
-          description: v.description,
+          description: v.description || "",
           specs: {
-            year: v.year.toString(),
-            make: v.make,
-            model: v.model,
-            trim: v.trim,
-            fuelType: v.fuel_type,
-            transmission: v.transmission,
-            drivetrain: v.drivetrain,
-            exteriorColor: v.color,
+            year: (v.year || "").toString(),
+            make: v.make || "",
+            model: v.model || "",
+            trim: v.trim || "",
+            fuelType: v.fuel_type || "",
+            transmission: v.transmission || "",
+            drivetrain: v.drivetrain || "",
+            exteriorColor: v.color || "",
           },
-          estimatedValue: parseFloat(v.price),
-          currentHighBid: v.max_bid_amount,
+          estimatedValue: parseFloat(v.price || "0"),
+          currentHighBid: v.max_bid_amount || 0,
         };
       });
 
