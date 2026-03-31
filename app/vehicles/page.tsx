@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from "react";
 import MainLayout from "@/components/layout/MainLayout";
-import VehicleCard from "@/components/dashboard/VehicleCard";
 import VehicleFilters from "@/components/vehicles/VehicleFilters";
 import Pagination from "@/components/vehicles/Pagination";
 import { useAuthStore } from "@/store/useAuthStore";
 import type { Vehicle } from "@/types";
+import VehicleCard from "@/components/dashboard/VehicleCard";
 
 type ApiVehicle = {
   id: number;
