@@ -280,13 +280,77 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Car, Truck, CarFront, Bike, Bus, Caravan, Container, Hammer,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import clsx from "clsx";
+import { useAuthStore } from "@/store/useAuthStore";
 
-const vehicleTypes = [
+type VehicleTypeOption = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+type CategoryItem = {
+  id?: number;
+  vehicle_category_id?: number;
+};
+
+type LookupCategory = {
+  id: number;
+  category_name: string;
+  status?: string;
+};
+
+type PriceRangeItem = {
+  id: number;
+  min_price: number;
+  max_price: number;
+};
+
+type BuyingVolumeItem = {
+  id: number;
+  min_volume: number;
+  max_volume: number;
+};
+
+type MileagePreferenceItem = {
+  id: number;
+  mileage: string;
+};
+
+type TitleSituationItem = {
+  id: number;
+  titleSituation: string;
+};
+
+type PreferenceResponse = {
+  success: boolean;
+  message?: string;
+  data?: {
+    price_range: PriceRangeItem | null;
+    mileage_preference: MileagePreferenceItem | null;
+    title_situation: TitleSituationItem | null;
+    category: CategoryItem[];
+    buying_volume: BuyingVolumeItem | null;
+  };
+};
+
+type ApiListResponse<T> = {
+  success: boolean;
+  data: T[];
+};
+
+type UpdatePreferenceResponse = {
+  success?: boolean;
+  status?: boolean;
+  message?: string;
+};
+
+const defaultVehicleTypes: VehicleTypeOption[] = [
   { id: "cars", label: "Cars", icon: Car },
   { id: "trucks", label: "Trucks", icon: Truck },
   { id: "suvs", label: "SUVs", icon: CarFront },
@@ -298,15 +362,38 @@ const vehicleTypes = [
   { id: "work", label: "Work Trucks", icon: Hammer },
 ];
 
-const dropdownOptions = ["Clean", "Salvage", "Rebuilt", "Lien", "Any"];
+const iconCycle: LucideIcon[] = [Car, Truck, CarFront, Bike, Bus, Caravan, Container, Hammer];
+
+const titleToleranceOptions = [
+  { id: 1, label: "Clean Only" },
+  { id: 2, label: "Clean or Salvage" },
+  { id: 3, label: "Any Title" },
+  { id: 4, label: "Rebuilt Accepted" },
+];
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL_DEAL || "https://secondbackend.vintocash.com/api";
+
+const formatPrice = (price: number) => {
+  if (price >= 1000) return `$${(price / 1000).toFixed(0)}k`;
+  return `$${price}`;
+};
+
+const formatPriceRange = (range: PriceRangeItem) =>
+  `${formatPrice(range.min_price)} - ${formatPrice(range.max_price)}`;
+
+const formatBuyingVolume = (volume: BuyingVolumeItem) =>
+  `${volume.min_volume}-${volume.max_volume} units/mo`;
 
 function Dropdown({
   label,
   value,
+  options,
   onChange,
 }: {
   label: string;
   value: string;
+  options: string[];
   onChange: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -350,7 +437,7 @@ function Dropdown({
               onClick={() => setOpen(false)}
             />
             <div className="absolute top-full left-0 right-0 mt-1 z-20 bg-white border border-gray-100 rounded-xl shadow-lg py-1">
-              {dropdownOptions.map((opt) => (
+              {options.map((opt) => (
                 <button
                   key={opt}
                   type="button"
@@ -377,11 +464,164 @@ function Dropdown({
 }
 
 export default function PreferencesClient() {
-  const [selectedTypes, setSelectedTypes] = useState<string[]>(["cars", "trucks"]);
-  const [priceRange, setPriceRange] = useState("Clean");
-  const [mileagePref, setMileagePref] = useState("Clean");
-  const [titleTolerance, setTitleTolerance] = useState("Clean");
-  const [buyingVolume, setBuyingVolume] = useState("Clean");
+  const token = useAuthStore((state) => state.token);
+
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [vehicleTypes, setVehicleTypes] = useState<VehicleTypeOption[]>(defaultVehicleTypes);
+  const [priceRange, setPriceRange] = useState("Not set");
+  const [mileagePref, setMileagePref] = useState("Not set");
+  const [titleTolerance, setTitleTolerance] = useState("Not set");
+  const [buyingVolume, setBuyingVolume] = useState("Not set");
+
+  const [priceRangeOptions, setPriceRangeOptions] = useState<string[]>(["Not set"]);
+  const [mileageOptions, setMileageOptions] = useState<string[]>(["Not set"]);
+  const [titleOptions, setTitleOptions] = useState<string[]>(titleToleranceOptions.map((item) => item.label));
+  const [buyingVolumeOptions, setBuyingVolumeOptions] = useState<string[]>(["Not set"]);
+  const [priceRangeLabelToId, setPriceRangeLabelToId] = useState<Record<string, number>>({});
+  const [mileageLabelToId, setMileageLabelToId] = useState<Record<string, number>>({});
+  const [titleLabelToId, setTitleLabelToId] = useState<Record<string, number>>(
+    titleToleranceOptions.reduce<Record<string, number>>((acc, item) => {
+      acc[item.label] = item.id;
+      return acc;
+    }, {})
+  );
+  const [buyingVolumeLabelToId, setBuyingVolumeLabelToId] = useState<Record<string, number>>({});
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const unsub = useAuthStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true);
+    }
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    if (!token) {
+      setIsLoading(false);
+      setError("Please login to load dealer preferences.");
+      return;
+    }
+
+    const fetchPreferences = async () => {
+      setIsLoading(true);
+      setError("");
+      setSaveMessage("");
+
+      try {
+        const headers = {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        };
+
+        const [preferencesRes, categoriesRes, priceRangeRes, mileageRes, buyingVolumeRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/dealer/profile/preference`, { method: "GET", headers }),
+          fetch(`${API_BASE_URL}/dealer/vehicle/category`, { method: "GET" }),
+          fetch(`${API_BASE_URL}/dealer/vehicle/pricerange`, { method: "GET" }),
+          fetch(`${API_BASE_URL}/dealer/vehicle/mileagepreference`, { method: "GET" }),
+          fetch(`${API_BASE_URL}/dealer/vehicle/buyingvolume`, { method: "GET" }),
+        ]);
+
+        const preferencesJson: PreferenceResponse = await preferencesRes.json();
+        const categoriesJson: ApiListResponse<LookupCategory> = await categoriesRes.json();
+        const priceRangeJson: ApiListResponse<PriceRangeItem> = await priceRangeRes.json();
+        const mileageJson: ApiListResponse<MileagePreferenceItem> = await mileageRes.json();
+        const buyingVolumeJson: ApiListResponse<BuyingVolumeItem> = await buyingVolumeRes.json();
+
+        if (!preferencesRes.ok || !preferencesJson.success || !preferencesJson.data) {
+          throw new Error(preferencesJson.message || "Failed to load preferences.");
+        }
+
+        const activeCategories = categoriesJson.success
+          ? categoriesJson.data.filter((item) => !item.status || item.status === "active")
+          : [];
+
+        if (activeCategories.length > 0) {
+          setVehicleTypes(
+            activeCategories.map((item, index) => ({
+              id: String(item.id),
+              label: item.category_name,
+              icon: iconCycle[index % iconCycle.length],
+            }))
+          );
+        }
+
+        if (priceRangeJson.success && priceRangeJson.data.length > 0) {
+          const labels = priceRangeJson.data.map(formatPriceRange);
+          setPriceRangeOptions(labels);
+          setPriceRangeLabelToId(
+            priceRangeJson.data.reduce<Record<string, number>>((acc, item) => {
+              acc[formatPriceRange(item)] = item.id;
+              return acc;
+            }, {})
+          );
+        }
+
+        if (mileageJson.success && mileageJson.data.length > 0) {
+          const labels = mileageJson.data.map((item) => item.mileage);
+          setMileageOptions(labels);
+          setMileageLabelToId(
+            mileageJson.data.reduce<Record<string, number>>((acc, item) => {
+              acc[item.mileage] = item.id;
+              return acc;
+            }, {})
+          );
+        }
+
+        if (buyingVolumeJson.success && buyingVolumeJson.data.length > 0) {
+          const labels = buyingVolumeJson.data.map(formatBuyingVolume);
+          setBuyingVolumeOptions(labels);
+          setBuyingVolumeLabelToId(
+            buyingVolumeJson.data.reduce<Record<string, number>>((acc, item) => {
+              acc[formatBuyingVolume(item)] = item.id;
+              return acc;
+            }, {})
+          );
+        }
+
+        const prefData = preferencesJson.data;
+
+        const selectedCategoryIds = prefData.category
+          ?.map((item) => item.vehicle_category_id)
+          .filter((id): id is number => typeof id === "number")
+          .map(String);
+
+        setSelectedTypes(selectedCategoryIds?.length ? selectedCategoryIds : []);
+        setPriceRange(prefData.price_range ? formatPriceRange(prefData.price_range) : "Not set");
+        setMileagePref(prefData.mileage_preference?.mileage || "Not set");
+        setTitleTolerance(prefData.title_situation?.titleSituation || "Not set");
+        setBuyingVolume(prefData.buying_volume ? formatBuyingVolume(prefData.buying_volume) : "Not set");
+
+        if (prefData.title_situation?.titleSituation) {
+          setTitleOptions((prev) => {
+            if (prev.includes(prefData.title_situation!.titleSituation)) return prev;
+            return [prefData.title_situation!.titleSituation, ...prev];
+          });
+
+          setTitleLabelToId((prev) => ({
+            ...prev,
+            [prefData.title_situation!.titleSituation]: prefData.title_situation!.id,
+          }));
+        }
+      } catch (fetchError: unknown) {
+        setError(fetchError instanceof Error ? fetchError.message : "Failed to load preferences.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchPreferences();
+  }, [hydrated, token]);
 
   const toggleType = (id: string) => {
     setSelectedTypes((prev) =>
@@ -389,8 +629,85 @@ export default function PreferencesClient() {
     );
   };
 
+  const handleSavePreferences = async () => {
+    setSaveMessage("");
+
+    if (!token) {
+      setError("Please login to save preferences.");
+      return;
+    }
+
+    const priceRangeId = priceRangeLabelToId[priceRange];
+    const mileagePreferenceId = mileageLabelToId[mileagePref];
+    const titleSituationId = titleLabelToId[titleTolerance];
+
+    if (!priceRangeId || !mileagePreferenceId || !titleSituationId || selectedTypes.length === 0) {
+      setError("Please select all preference fields before saving.");
+      return;
+    }
+
+    const categoryIds = selectedTypes
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item));
+
+    if (categoryIds.length === 0) {
+      setError("Please select at least one vehicle category.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/dealer/preference/update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          price_range_id: priceRangeId,
+          mileage_preference_id: mileagePreferenceId,
+          title_situation_id: titleSituationId,
+          category_ids: categoryIds,
+        }),
+      });
+
+      const result: UpdatePreferenceResponse = await response.json();
+
+      if (!response.ok || (!result.success && !result.status)) {
+        throw new Error(result.message || "Failed to update preferences.");
+      }
+
+      setSaveMessage(result.message || "Preferences updated successfully.");
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to update preferences.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="flex flex-col lg:flex-row gap-4 relative pb-20 lg:pb-0">
+      {isLoading && (
+        <div className="w-full rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+          Loading dealer preferences...
+        </div>
+      )}
+
+      {!isLoading && error && (
+        <div className="w-full rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {!isLoading && saveMessage && !error && (
+        <div className="w-full rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+          {saveMessage}
+        </div>
+      )}
+
       {/* LEFT — Vehicle Types */}
       <div className="w-full lg:w-56 shrink-0 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <div className="flex items-center gap-2 mb-4">
@@ -465,14 +782,34 @@ export default function PreferencesClient() {
 
         {/* Row 1 */}
         <div className="flex flex-col sm:flex-row gap-4 mb-4">
-          <Dropdown label="Price Range" value={priceRange} onChange={setPriceRange} />
-          <Dropdown label="Mileage preference" value={mileagePref} onChange={setMileagePref} />
+          <Dropdown
+            label="Price Range"
+            value={priceRange}
+            options={priceRangeOptions}
+            onChange={setPriceRange}
+          />
+          <Dropdown
+            label="Mileage preference"
+            value={mileagePref}
+            options={mileageOptions}
+            onChange={setMileagePref}
+          />
         </div>
 
         {/* Row 2 */}
         <div className="flex flex-col sm:flex-row gap-4">
-          <Dropdown label="Title Tolerance" value={titleTolerance} onChange={setTitleTolerance} />
-          <Dropdown label="Buying Volume" value={buyingVolume} onChange={setBuyingVolume} />
+          <Dropdown
+            label="Title Tolerance"
+            value={titleTolerance}
+            options={titleOptions}
+            onChange={setTitleTolerance}
+          />
+          <Dropdown
+            label="Buying Volume"
+            value={buyingVolume}
+            options={buyingVolumeOptions}
+            onChange={setBuyingVolume}
+          />
         </div>
       </div>
 
@@ -481,8 +818,13 @@ export default function PreferencesClient() {
         <button className="flex-1 lg:flex-none lg:px-8 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors bg-white">
           Cancel
         </button>
-        <button className="flex-1 lg:flex-none lg:px-8 py-2.5 rounded-xl bg-[#D93E39] text-white text-sm font-semibold hover:bg-red-600 transition-colors">
-          Save Preferences
+        <button
+          type="button"
+          onClick={handleSavePreferences}
+          disabled={isSaving || isLoading}
+          className="flex-1 lg:flex-none lg:px-8 py-2.5 rounded-xl bg-[#D93E39] text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isSaving ? "Saving..." : "Save Preferences"}
         </button>
       </div>
     </div>

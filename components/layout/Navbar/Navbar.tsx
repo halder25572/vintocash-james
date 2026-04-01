@@ -1,17 +1,99 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Menu, ChevronDown } from "lucide-react";
 import Image from "next/image";
+import { useAuthStore } from "@/store/useAuthStore";
+
+type DealerInfoResponse = {
+  success: boolean;
+  data?: {
+    name: string;
+    contact_name: string;
+    profile_image: string | null;
+  };
+};
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL_DEAL || "https://secondbackend.vintocash.com/api";
+
+const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
+
+const FALLBACK_PROFILE_IMAGE = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face";
+
+const buildImageCandidates = (imagePath: string | null | undefined) => {
+  if (!imagePath) return [];
+  if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) return [imagePath];
+
+  const normalized = imagePath.replace(/^\/+/, "");
+  const timestamp = new Date().getTime();
+  const candidates = [
+    `${API_ORIGIN}/${normalized}?v=${timestamp}`,
+    `${API_ORIGIN}/storage/${normalized}?v=${timestamp}`,
+    `${API_BASE_URL}/${normalized}?v=${timestamp}`,
+  ];
+
+  return [...new Set(candidates)];
+};
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false); // Desktop dropdown
+  const [hydrated, setHydrated] = useState(false);
+  const [dealerName, setDealerName] = useState("Dealer");
+  const [dealerImageCandidates, setDealerImageCandidates] = useState<string[]>([]);
+  const [dealerImageIndex, setDealerImageIndex] = useState(0);
+  const user = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
   const pathname = usePathname();
+
+  const dealerImage = dealerImageCandidates[dealerImageIndex] || FALLBACK_PROFILE_IMAGE;
+
+  useEffect(() => {
+    const unsub = useAuthStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true);
+    }
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (user?.name) {
+      setDealerName(user.name);
+    }
+    if (!token) return;
+
+    const fetchDealerInfo = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/dealer/info`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const result: DealerInfoResponse = await response.json();
+        if (!response.ok || !result.success || !result.data) return;
+
+        setDealerName(result.data.name || result.data.contact_name || user?.name || "Dealer");
+        setDealerImageCandidates(buildImageCandidates(result.data.profile_image));
+        setDealerImageIndex(0);
+      } catch {
+        // Keep fallback data from auth store.
+      }
+    };
+
+    fetchDealerInfo();
+  }, [hydrated, token, user?.name]);
 
   const navLinks = [
     { name: "Home", href: "/" },
@@ -107,14 +189,31 @@ export default function Navbar() {
           </nav>
 
           {/* Desktop CTA Button */}
-          <div className="hidden md:block">
+          <div className="hidden md:flex items-center gap-4">
+            {token && (
+              <Link href="/dashboard" className="flex items-center gap-2">
+                <div className="relative w-9 h-9 rounded-full overflow-hidden bg-gray-200">
+                  <Image
+                    src={dealerImage}
+                    alt={dealerName}
+                    fill
+                    className="object-cover"
+                    onError={() => setDealerImageIndex((prev) => prev + 1)}
+                  />
+                </div>
+                <span className="text-sm font-semibold text-gray-800 max-w-32 truncate">
+                  {dealerName}
+                </span>
+              </Link>
+            )}
+
             <Button
               asChild
               size="lg"
               className="bg-[#D93E39] cursor-pointer px-6 py-5 text-base font-medium rounded-full shadow-md transition-all"
             >
               <Link href="/getAOffer">Get A Offer</Link>
-            </Button> 
+            </Button>
           </div>
         </div>
 
