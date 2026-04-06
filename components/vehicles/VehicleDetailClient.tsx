@@ -24,8 +24,8 @@ export default function VehicleDetailClient({ vehicle }: { vehicle: Vehicle }) {
   const token = useAuthStore((state) => state.token);
 
   const API_BASE_URL =
-    process.env.NEXT_PUBLIC_API_URL_DEAL ||
-    "https://secondbackend.vintocash.com/api";
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://backend.vintocash.com/api";
 
   const images = vehicle.images?.length ? vehicle.images : [vehicle.image];
 

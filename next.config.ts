@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   },
 
   images: {
-    unoptimized: process.env.NEXT_PUBLIC_STATIC_EXPORT === "true",
+    unoptimized: true, // FIX: cache buster query string এর জন্য unoptimized true করা হয়েছে
     remotePatterns: [
       {
         protocol: "https",
@@ -31,18 +31,18 @@ const nextConfig: NextConfig = {
     ],
   },
 
-async rewrites() {
-  return [
-    {
-      source: "/api/proxy/:path*",
-      destination: "https://backend.vintocash.com/api/:path*",
-    },
-    {
-      source: "/api/deal/:path*",
-      destination: "https://secondbackend.vintocash.com/api/:path*",
-    },
-  ];
-},
+  async rewrites() {
+    return [
+      {
+        source: "/api/proxy/:path*",
+        destination: "https://backend.vintocash.com/api/:path*",
+      },
+      {
+        source: "/api/deal/:path*",
+        destination: "https://backend.vintocash.com/api/:path*",
+      },
+    ];
+  },
 
   output: process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" ? "export" : undefined,
 

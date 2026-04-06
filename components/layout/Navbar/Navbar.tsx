@@ -1,99 +1,170 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Menu, ChevronDown } from "lucide-react";
+import { Menu, ChevronDown, LogOut } from "lucide-react";
 import Image from "next/image";
 import { useAuthStore } from "@/store/useAuthStore";
 
 type DealerInfoResponse = {
   success: boolean;
   data?: {
-    name: string;
-    contact_name: string;
-    profile_image: string | null;
+    profile_image?: string | null;
   };
 };
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL_DEAL || "https://secondbackend.vintocash.com/api";
-
+  process.env.NEXT_PUBLIC_API_URL || "https://backend.vintocash.com/api";
 const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
+const STORAGE_ORIGIN = (
+  process.env.NEXT_PUBLIC_API_BASE_URL || "https://backend.vintocash.com/api"
+).replace(/\/api\/?$/, "");
 
-const FALLBACK_PROFILE_IMAGE = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face";
+const DEALER_PROFILE_IMAGE_KEY = "dealer-profile-image-path";
 
-const buildImageCandidates = (imagePath: string | null | undefined) => {
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+const isDataUrl = (value: string | null | undefined) =>
+  Boolean(value && value.startsWith("data:"));
+
+// FIX: cache buster সরানো হয়েছে — এটাই Next.js Image কে break করছিল
+const buildImageCandidates = (imagePath: string | null | undefined): string[] => {
   if (!imagePath) return [];
-  if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) return [imagePath];
 
+  // Full URL হলে সরাসরি use করো
+  if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
+    return [imagePath];
+  }
+
+  // Relative path হলে দুটো origin থেকে try করো
   const normalized = imagePath.replace(/^\/+/, "");
-  const timestamp = new Date().getTime();
-  const candidates = [
-    `${API_ORIGIN}/${normalized}?v=${timestamp}`,
-    `${API_ORIGIN}/storage/${normalized}?v=${timestamp}`,
-    `${API_BASE_URL}/${normalized}?v=${timestamp}`,
-  ];
-
-  return [...new Set(candidates)];
+  return [...new Set([
+    `${API_ORIGIN}/${normalized}`,
+    `${STORAGE_ORIGIN}/${normalized}`,
+  ])];
 };
+
+const fetchDealerInfoSnapshot = async (authToken: string): Promise<string | null> => {
+  const response = await fetch(`${API_BASE_URL}/dealer/info`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
+  });
+
+  const result: DealerInfoResponse = await response.json();
+
+  if (!response.ok || !result.success || !result.data) {
+    throw new Error("Failed to load dealer info.");
+  }
+
+  return result.data.profile_image || null;
+};
+
+// ─── component ──────────────────────────────────────────────────────────────
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false); // Desktop dropdown
-  const [hydrated, setHydrated] = useState(false);
-  const [dealerName, setDealerName] = useState("Dealer");
-  const [dealerImageCandidates, setDealerImageCandidates] = useState<string[]>([]);
-  const [dealerImageIndex, setDealerImageIndex] = useState(0);
-  const user = useAuthStore((state) => state.user);
-  const token = useAuthStore((state) => state.token);
   const pathname = usePathname();
+  const router = useRouter();
 
-  const dealerImage = dealerImageCandidates[dealerImageIndex] || FALLBACK_PROFILE_IMAGE;
+  const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+  const [imgError, setImgError] = useState(false);
+
+  const candidatesRef = useRef<string[]>([]);
+  const candidateIndexRef = useRef(0);
+
+  const loadCandidates = (candidates: string[]) => {
+    candidatesRef.current = candidates;
+    candidateIndexRef.current = 0;
+    setImgError(false);
+    setProfileImageUrl(candidates[0] || null);
+  };
+
+  const handleImgError = () => {
+    const next = candidateIndexRef.current + 1;
+    if (next < candidatesRef.current.length) {
+      candidateIndexRef.current = next;
+      setProfileImageUrl(candidatesRef.current[next]);
+    } else {
+      setProfileImageUrl(null);
+      setImgError(true);
+    }
+  };
 
   useEffect(() => {
-    const unsub = useAuthStore.persist.onFinishHydration(() => {
-      setHydrated(true);
-    });
-    if (useAuthStore.persist.hasHydrated()) {
-      setHydrated(true);
+    // localStorage থেকে আগের image দেখাও
+    const persisted = window.localStorage.getItem(DEALER_PROFILE_IMAGE_KEY);
+    if (persisted) {
+      loadCandidates(buildImageCandidates(persisted));
     }
-    return () => unsub();
-  }, []);
 
-  useEffect(() => {
-    if (!hydrated) return;
-    if (user?.name) {
-      setDealerName(user.name);
-    }
     if (!token) return;
 
-    const fetchDealerInfo = async () => {
+    const fetchUserImage = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/dealer/info`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const apiImagePath = await fetchDealerInfoSnapshot(token);
 
-        const result: DealerInfoResponse = await response.json();
-        if (!response.ok || !result.success || !result.data) return;
-
-        setDealerName(result.data.name || result.data.contact_name || user?.name || "Dealer");
-        setDealerImageCandidates(buildImageCandidates(result.data.profile_image));
-        setDealerImageIndex(0);
-      } catch {
-        // Keep fallback data from auth store.
+        if (apiImagePath) {
+          window.localStorage.setItem(DEALER_PROFILE_IMAGE_KEY, apiImagePath);
+          loadCandidates(buildImageCandidates(apiImagePath));
+        }
+      } catch (error) {
+        console.error("[Navbar] dealer image fetch failed:", error);
       }
     };
 
-    fetchDealerInfo();
-  }, [hydrated, token, user?.name]);
+    fetchUserImage();
+
+    const handleDealerProfileUpdated = (event: Event) => {
+      const { detail } = event as CustomEvent<{ image?: string; previewImage?: string }>;
+      const nextPath = detail?.previewImage || detail?.image;
+
+      if (!nextPath) {
+        fetchUserImage();
+        return;
+      }
+
+      if (isDataUrl(nextPath)) {
+        setProfileImageUrl(nextPath);
+        candidatesRef.current = [];
+        return;
+      }
+
+      if (detail?.image) {
+        window.localStorage.setItem(DEALER_PROFILE_IMAGE_KEY, detail.image);
+      }
+      loadCandidates(buildImageCandidates(nextPath));
+    };
+
+    window.addEventListener("dealer-profile-updated", handleDealerProfileUpdated);
+    return () => window.removeEventListener("dealer-profile-updated", handleDealerProfileUpdated);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const getInitials = (name: string) =>
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("");
+
+  const handleLogout = async () => {
+    await logout();
+    window.localStorage.removeItem(DEALER_PROFILE_IMAGE_KEY);
+    setProfileImageUrl(null);
+    router.push("/login");
+  };
 
   const navLinks = [
     { name: "Home", href: "/" },
@@ -102,31 +173,51 @@ export default function Navbar() {
     { name: "What We Buy", href: "/whatWeBuy" },
   ];
 
-  // Dealers with dropdown
   const dealersDropdown = {
     name: "Dealers",
     items: [
-      { 
-        name: "Login", 
-        href: "/login",
-        external: true 
-      },
+      { name: "Login", href: "/login", external: true },
       { name: "Registration", href: "/dealers" },
     ],
   };
 
-  const isActive = (href: string) => {
-    return pathname === href || (href !== "/" && pathname.startsWith(href));
+  const isActive = (href: string) =>
+    pathname === href || (href !== "/" && pathname.startsWith(href));
+
+  // ── Shared Avatar component ──────────────────────────────────────────────
+  const Avatar = ({ size = 36 }: { size?: number }) => {
+    const initials = getInitials(user?.name || "User");
+    return (
+      <div
+        style={{ width: size, height: size, minWidth: size }}
+        className="relative flex items-center justify-center rounded-full bg-[#D93E39] text-white font-semibold overflow-hidden"
+      >
+        {profileImageUrl && !imgError ? (
+          <Image
+            src={profileImageUrl}
+            alt={user?.name || "User"}
+            width={size}
+            height={size}
+            className="object-cover w-full h-full rounded-full"
+            onError={handleImgError}
+            unoptimized
+          />
+        ) : (
+          <span style={{ fontSize: size * 0.38 }}>{initials}</span>
+        )}
+      </div>
+    );
   };
+
+  // ────────────────────────────────────────────────────────────────────────
 
   return (
     <header className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 lg:px-8 h-25">
+
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="relative">
-            <Image src="/images/logo1.jpg" alt="VintoCash Logo" width={137} height={0} />
-          </div>
+          <Image src="/images/logo1.jpg" alt="VintoCash Logo" width={137} height={0} />
         </Link>
 
         <div className="flex items-center gap-6">
@@ -146,16 +237,12 @@ export default function Navbar() {
               </Link>
             ))}
 
-            {/* ✅ Dealers Dropdown */}
-            <div 
-              className="relative group"
-              onMouseEnter={() => setDropdownOpen(true)}
-              onMouseLeave={() => setDropdownOpen(false)}
-            >
+            {/* Dealers Dropdown */}
+            <div className="relative group">
               <button
                 className={`flex items-center cursor-pointer gap-1 text-[16px] font-medium transition-colors ${
-                  isActive("/dealers") 
-                    ? "text-[#D93E39] font-semibold" 
+                  isActive("/dealers")
+                    ? "text-[#D93E39] font-semibold"
                     : "text-[#6D717F] hover:text-gray-900"
                 }`}
               >
@@ -163,7 +250,6 @@ export default function Navbar() {
                 <ChevronDown className="h-4 w-4 transition-transform group-hover:rotate-180" />
               </button>
 
-              {/* Dropdown Menu */}
               <div className="absolute left-0 mt-2 w-56 bg-white rounded-lg shadow-lg py-2 border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                 {dealersDropdown.items.map((item) => {
                   const isExternal = item.external || item.href.startsWith("http");
@@ -178,7 +264,6 @@ export default function Navbar() {
                           ? "text-[#D93E39] font-semibold"
                           : "text-gray-700 hover:text-gray-900"
                       }`}
-                      onClick={() => setDropdownOpen(false)}
                     >
                       {item.name}
                     </Link>
@@ -188,23 +273,31 @@ export default function Navbar() {
             </div>
           </nav>
 
-          {/* Desktop CTA Button */}
+          {/* Desktop CTA */}
           <div className="hidden md:flex items-center gap-4">
-            {token && (
-              <Link href="/dashboard" className="flex items-center gap-2">
-                <div className="relative w-9 h-9 rounded-full overflow-hidden bg-gray-200">
-                  <Image
-                    src={dealerImage}
-                    alt={dealerName}
-                    fill
-                    className="object-cover"
-                    onError={() => setDealerImageIndex((prev) => prev + 1)}
-                  />
-                </div>
-                <span className="text-sm font-semibold text-gray-800 max-w-32 truncate">
-                  {dealerName}
-                </span>
-              </Link>
+            {token && user && (
+              <>
+                <Link
+                  href="/dashboard"
+                  className="flex items-center gap-2 rounded-full border border-gray-200 px-3 py-1.5 hover:bg-gray-50 transition-colors"
+                >
+                  <Avatar size={36} />
+                  <div className="max-w-32">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                  </div>
+                </Link>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="cursor-pointer rounded-full text-gray-600 hover:text-[#D93E39]"
+                  onClick={handleLogout}
+                >
+                  <LogOut className="h-5 w-5" />
+                  <span className="sr-only">Logout</span>
+                </Button>
+              </>
             )}
 
             <Button
@@ -229,26 +322,25 @@ export default function Navbar() {
 
             <SheetContent side="right" className="w-[85%] sm:w-95 pr-0">
               <div className="flex items-center justify-between mb-8">
-                <Link
-                  href="/"
-                  className="flex items-center gap-2.5"
-                  onClick={() => setOpen(false)}
-                >
-                  <div className="relative">
-                    <Image src="/images/logo.png" alt="VintoCash Logo" width={137} height={0} />
-                  </div>
+                <Link href="/" className="flex items-center gap-2.5" onClick={() => setOpen(false)}>
+                  <Image src="/images/logo.png" alt="VintoCash Logo" width={137} height={0} />
                   <span className="text-2xl font-bold text-gray-900">
                     <span className="text-[#D93E39]">Vinto</span>Cash
                   </span>
                 </Link>
-
-                <Button variant="ghost" size="icon" onClick={() => setOpen(false)}>
-                  {/* Close button if needed */}
-                </Button>
               </div>
 
-              {/* Mobile Links */}
               <nav className="flex flex-col gap-6 text-lg">
+                {token && user && (
+                  <div className="flex items-center gap-3 rounded-xl border border-gray-200 p-3">
+                    <Avatar size={40} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                    </div>
+                  </div>
+                )}
+
                 {navLinks.map((link) => (
                   <Link
                     key={link.name}
@@ -264,7 +356,6 @@ export default function Navbar() {
                   </Link>
                 ))}
 
-                {/* Mobile Dealers (সাধারণ লিংক হিসেবে রাখা হয়েছে) */}
                 <Link
                   href="/dealers"
                   className={`font-medium transition-colors ${
@@ -277,7 +368,32 @@ export default function Navbar() {
                   Dealers
                 </Link>
 
-                {/* Mobile CTA */}
+                {token && (
+                  <>
+                    <Link
+                      href="/dashboard"
+                      className={`font-medium transition-colors ${
+                        isActive("/dashboard")
+                          ? "text-[#D93E39] font-semibold"
+                          : "text-gray-700 hover:text-gray-900"
+                      }`}
+                      onClick={() => setOpen(false)}
+                    >
+                      Dashboard
+                    </Link>
+
+                    <button
+                      onClick={async () => {
+                        await handleLogout();
+                        setOpen(false);
+                      }}
+                      className="text-left font-medium text-gray-700 hover:text-[#D93E39] transition-colors"
+                    >
+                      Logout
+                    </button>
+                  </>
+                )}
+
                 <div className="mt-6">
                   <Button
                     asChild
@@ -297,3 +413,4 @@ export default function Navbar() {
     </header>
   );
 }
+

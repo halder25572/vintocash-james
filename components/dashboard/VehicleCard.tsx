@@ -110,8 +110,6 @@ export default function VehicleCard({
   const router = useRouter();
   const [showBidModal, setShowBidModal] = useState(false);
 
-  console.log("vehicle Data", vehicle);
-
   return (
     <>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">

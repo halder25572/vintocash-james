@@ -44,7 +44,13 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="flex items-center justify-between px-5 border-b border-gray-300">
         <div className="flex items-center gap-2">
-          <Image src="/images/logo.png" width={100} height={100} alt="logo" />
+          <Image
+            src="/images/logo.png"
+            width={100}
+            height={100}
+            alt="logo"
+            style={{ height: "auto" }}
+          />
           <p className="mb-2.75 pt-7.75 text-2xl font-bold"><span className="text-[#D93E39]">Vinto</span> Cash</p>
         </div>
         {/* <Link href="/" className="flex items-center gap-2">

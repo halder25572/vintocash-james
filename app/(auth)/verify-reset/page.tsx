@@ -32,8 +32,8 @@ export default function VerifyResetPage() {
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
   const API_BASE_URL =
-    process.env.NEXT_PUBLIC_API_URL_DEAL ||
-    "https://secondbackend.vintocash.com/api";
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://backend.vintocash.com/api";
 
   const handleChange = (i: number, val: string) => {
     if (!/^\d*$/.test(val)) return;

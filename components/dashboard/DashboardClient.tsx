@@ -5,6 +5,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 import StatsCard from "@/components/dashboard/StatsCard";
 import VehicleCard from "@/components/dashboard/VehicleCard";
 import { vehicles } from "@/lib/data";
+import { useChatListener } from "@/hooks/useChatListener";
 
 type DashboardResponse = {
   success: boolean;
@@ -20,7 +21,7 @@ type DashboardResponse = {
 };
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL_DEAL || "https://secondbackend.vintocash.com/api";
+  process.env.NEXT_PUBLIC_API_URL || "https://backend.vintocash.com/api";
 
 export default function DashboardClient() {
   const token = useAuthStore((state) => state.token);
@@ -30,6 +31,62 @@ export default function DashboardClient() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [dashboardData, setDashboardData] = useState<DashboardResponse["data"] | null>(null);
+
+  const loadDashboardData = async (showLoadingState: boolean) => {
+    if (!hydrated || !token) {
+      return;
+    }
+
+    if (showLoadingState) {
+      setIsLoading(true);
+      setError("");
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/dealer/dashboard`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result: DashboardResponse = await response.json();
+
+      if (!response.ok || !result.success || !result.data) {
+        if (showLoadingState) {
+          throw new Error(result.message || "Failed to load dashboard data.");
+        }
+        return;
+      }
+
+      setDashboardData(result.data);
+    } catch (fetchError: unknown) {
+      if (showLoadingState) {
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Failed to load dashboard data."
+        );
+      }
+    } finally {
+      if (showLoadingState) {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  useChatListener({
+    token: hydrated ? token : null,
+    channelName: "chat-conversation",
+    eventName: "ChatEvent",
+    enabled: hydrated && !!token,
+    isPrivate: true,
+    onMessage: () => {
+      void loadDashboardData(false);
+    },
+  });
 
   useEffect(() => {
     const unsub = useAuthStore.persist.onFinishHydration(() => {
@@ -50,39 +107,7 @@ export default function DashboardClient() {
       return;
     }
 
-    const fetchDashboardData = async () => {
-      setIsLoading(true);
-      setError("");
-
-      try {
-        const response = await fetch(`${API_BASE_URL}/dealer/dashboard`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        const result: DashboardResponse = await response.json();
-
-        if (!response.ok || !result.success || !result.data) {
-          throw new Error(result.message || "Failed to load dashboard data.");
-        }
-
-        setDashboardData(result.data);
-      } catch (fetchError: unknown) {
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : "Failed to load dashboard data."
-        );
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchDashboardData();
+    void loadDashboardData(true);
   }, [hydrated, token]);
 
   const dashboardStats = dashboardData

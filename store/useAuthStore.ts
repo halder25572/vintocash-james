@@ -47,8 +47,8 @@ export const useAuthStore = create<AuthStore>()(
         if (token) {
           try {
             const API_BASE_URL =
-              process.env.NEXT_PUBLIC_API_URL_DEAL ||
-              "https://secondbackend.vintocash.com/api";
+              process.env.NEXT_PUBLIC_API_URL ||
+              "https://backend.vintocash.com/api";
             
             await fetch(`${API_BASE_URL}/user-logout`, {
               method: "POST",

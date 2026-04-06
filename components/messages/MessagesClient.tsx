@@ -1,22 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { Send, Paperclip, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useChatListener } from "@/hooks/useChatListener";
 
 type Message = {
   id: string;
   from: "them" | "me";
   text: string;
   time: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
 };
+
+type RealtimeEvent = Record<string, unknown>;
 
 type SendChatResponse = {
   status: boolean;
   message: string | string[];
-  data?: string;
+  data?: unknown;
   code?: number;
 };
 
@@ -52,6 +58,10 @@ type ChatListItem = {
   chat_image: string;
   image_id: string;
   unread_count: number;
+  is_super_admin?: boolean | number;
+  role?: string;
+  user_role?: string;
+  user_type?: string;
 };
 
 type ChatListResponse = {
@@ -72,6 +82,7 @@ type Conversation = {
   conversationId?: string;
   receiverId?: number;
   imageId?: string;
+  isSuperAdmin?: boolean;
   name: string;
   subtitle: string;
   avatar: string;
@@ -148,9 +159,21 @@ const conversations: Conversation[] = [
 ];
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL_DEAL || "https://secondbackend.vintocash.com/api";
+  process.env.NEXT_PUBLIC_API_URL || "https://backend.vintocash.com/api";
 
 const FALLBACK_AVATAR = "/icons/aad.png";
+const SUPER_ADMIN_ONLY_MESSAGE = "Only Super Admin chat is allowed.";
+const SUPER_ADMIN_RECEIVER_ID = Number(
+  process.env.NEXT_PUBLIC_SUPER_ADMIN_RECEIVER_ID || NaN
+);
+const SUPER_ADMIN_CHAT_ID = Number(
+  process.env.NEXT_PUBLIC_SUPER_ADMIN_CHAT_ID || NaN
+);
+const SUPER_ADMIN_CONVERSATION_ID = String(
+  process.env.NEXT_PUBLIC_SUPER_ADMIN_CONVERSATION_ID || ""
+).trim();
+const CHAT_POLL_INTERVAL_MS = 4000;
+const MAX_CHAT_FILE_SIZE = 10 * 1024 * 1024;
 
 const getDisplayTime = (latestTime: string) => {
   if (!latestTime) return "";
@@ -158,6 +181,201 @@ const getDisplayTime = (latestTime: string) => {
   const date = new Date(isoLike);
   if (Number.isNaN(date.getTime())) return latestTime;
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+};
+
+const toAbsoluteUrl = (rawUrl: string) => {
+  if (!rawUrl) return "";
+  if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
+    return rawUrl;
+  }
+
+  const base = API_BASE_URL.replace(/\/api\/?$/, "").replace(/\/$/, "");
+  const path = rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`;
+  return `${base}${path}`;
+};
+
+const coerceRecord = (value: unknown): Record<string, unknown> => {
+  if (typeof value === "object" && value !== null) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+};
+
+const readString = (
+  record: Record<string, unknown>,
+  keys: string[]
+): string | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
+const readNumber = (
+  record: Record<string, unknown>,
+  keys: string[]
+): number | undefined => {
+  for (const key of keys) {
+    const raw = record[key];
+    const num = Number(raw);
+    if (Number.isFinite(num)) {
+      return num;
+    }
+  }
+  return undefined;
+};
+
+const readFileLikeValue = (
+  record: Record<string, unknown>,
+  keys: string[]
+): string | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (!value) continue;
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const first = value[0];
+      if (typeof first === "string" && first.trim()) {
+        return first;
+      }
+      if (typeof first === "object" && first !== null) {
+        const firstRecord = first as Record<string, unknown>;
+        const nested = readString(firstRecord, [
+          "url",
+          "path",
+          "file",
+          "image",
+          "src",
+          "location",
+          "download_url",
+        ]);
+        if (nested) {
+          return nested;
+        }
+      }
+    }
+
+    if (typeof value === "object" && value !== null) {
+      const nestedRecord = value as Record<string, unknown>;
+      const nested = readString(nestedRecord, [
+        "url",
+        "path",
+        "file",
+        "image",
+        "src",
+        "location",
+        "download_url",
+        "document",
+        "document_url",
+        "file_url",
+      ]);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const parseRealtimeEvent = (
+  event: RealtimeEvent,
+  myUserId?: number
+): {
+  message: Message;
+  conversationId?: string;
+  chatId?: number;
+} | null => {
+  const eventRecord = coerceRecord(event);
+  const dataRecord = coerceRecord(eventRecord.data);
+  const eventPayloadRecord = coerceRecord(eventRecord.payload);
+  const messageRecord = coerceRecord(eventRecord.message);
+  const source =
+    Object.keys(messageRecord).length > 0
+      ? messageRecord
+      : Object.keys(dataRecord).length > 0
+        ? dataRecord
+        : Object.keys(eventPayloadRecord).length > 0
+          ? eventPayloadRecord
+          : eventRecord;
+
+  const fileUrlRaw =
+    readFileLikeValue(source, [
+      "chat_image",
+      "chatimage",
+      "image",
+      "attachment",
+      "file",
+      "file_url",
+      "image_url",
+      "document_url",
+      "document",
+      "attachment_url",
+      "media",
+      "chat_file",
+    ]) ||
+    readFileLikeValue(eventRecord, [
+      "chat_image",
+      "chatimage",
+      "image",
+      "attachment",
+      "file",
+      "file_url",
+      "image_url",
+      "document_url",
+      "document",
+      "attachment_url",
+      "media",
+      "chat_file",
+    ]);
+  const fileName =
+    readString(source, ["file_name", "attachment_name", "image_name"]) ||
+    (fileUrlRaw ? fileUrlRaw.split("/").pop() : undefined);
+  const fileType = readString(source, ["file_type", "mime_type", "content_type"]);
+  const text = readString(source, ["message", "text", "body", "content"]) || "";
+
+  if (!text && !fileUrlRaw) {
+    return null;
+  }
+
+  const senderType = String(source.sender_type || "").toLowerCase();
+  const senderId = readNumber(source, ["sender_id", "user_id", "from_id", "dealer_id"]);
+  const isMe =
+    source.is_me === true ||
+    senderType === "me" ||
+    senderType === "dealer" ||
+    senderType === "self" ||
+    (typeof myUserId === "number" && senderId === myUserId);
+
+  const rawTime =
+    readString(source, ["created_at", "updated_at", "time"]) ||
+    new Date().toISOString();
+
+  const id =
+    readString(source, ["id", "message_id", "uuid"]) ||
+    `rt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const message: Message = {
+    id,
+    from: isMe ? "me" : "them",
+    text: text || "Sent an attachment",
+    time: getDisplayTime(rawTime),
+    fileUrl: fileUrlRaw ? toAbsoluteUrl(fileUrlRaw) : undefined,
+    fileName,
+    fileType,
+  };
+
+  const conversationId = readString(source, ["conversation_id", "conversationId"]);
+  const chatId = readNumber(source, ["chat_id", "chatId"]);
+
+  return { message, conversationId, chatId };
 };
 
 const mapApiMessageToUi = (
@@ -175,6 +393,26 @@ const mapApiMessageToUi = (
     `${Date.now()}-${idx}`;
 
   const rawText = record.message ?? record.text ?? record.body ?? "";
+  const rawFile =
+    readFileLikeValue(record, [
+      "chat_image",
+      "chatimage",
+      "image",
+      "attachment",
+      "file",
+      "file_url",
+      "image_url",
+      "document_url",
+      "document",
+      "attachment_url",
+      "media",
+      "chat_file",
+    ]) || "";
+  console.log("rawFile from API:", rawFile, "record:", record);
+  const rawFileName =
+    record.file_name ?? record.attachment_name ?? record.image_name ?? "";
+  const rawFileType =
+    record.file_type ?? record.mime_type ?? record.content_type ?? "";
 
   const senderType = String(record.sender_type || "").toLowerCase();
   const numericSenderId = Number(
@@ -204,14 +442,49 @@ const mapApiMessageToUi = (
   return {
     id: String(rawId),
     from: isMe ? "me" : "them",
-    text: String(rawText),
+    text: String(rawText || (rawFile ? "Sent an attachment" : "")),
     time: getDisplayTime(String(rawTime)),
+    fileUrl: rawFile ? toAbsoluteUrl(String(rawFile)) : undefined,
+    fileName: String(rawFileName || (rawFile ? String(rawFile).split("/").pop() : "")),
+    fileType: String(rawFileType || ""),
   };
+};
+
+const isSuperAdminConversation = (item: ChatListItem): boolean => {
+  const role = String(item.role || item.user_role || item.user_type || "").toLowerCase();
+  const name = String(item.user_name || "").toLowerCase();
+  const explicitFlag = item.is_super_admin === true || Number(item.is_super_admin) === 1;
+  const byReceiverId =
+    Number.isFinite(SUPER_ADMIN_RECEIVER_ID) && item.receiver_id === SUPER_ADMIN_RECEIVER_ID;
+  const byChatId = Number.isFinite(SUPER_ADMIN_CHAT_ID) && item.chat_id === SUPER_ADMIN_CHAT_ID;
+  const byConversationId =
+    !!SUPER_ADMIN_CONVERSATION_ID && item.conversation_id === SUPER_ADMIN_CONVERSATION_ID;
+
+  return (
+    byReceiverId ||
+    byChatId ||
+    byConversationId ||
+    explicitFlag ||
+    role.includes("super_admin") ||
+    role.includes("super admin") ||
+    name.includes("super admin") ||
+    name.includes("vintocash admin") ||
+    name.includes("admin")
+  );
+};
+
+const resolveConversationAvatar = (item: ChatListItem, isSuperAdmin: boolean) => {
+  if (isSuperAdmin) {
+    return item.chat_image || item.user_image || FALLBACK_AVATAR;
+  }
+
+  return item.chat_image || item.user_image || item.my_image || FALLBACK_AVATAR;
 };
 
 const buildConversationFromApi = (item: ChatListItem): Conversation => {
   const previewMessage = item.message || "No messages yet";
-  const image = item.chat_image || item.user_image || item.my_image || FALLBACK_AVATAR;
+  const isSuperAdmin = isSuperAdminConversation(item);
+  const image = resolveConversationAvatar(item, isSuperAdmin);
 
   return {
     id: item.conversation_id,
@@ -219,6 +492,7 @@ const buildConversationFromApi = (item: ChatListItem): Conversation => {
     conversationId: item.conversation_id,
     receiverId: item.receiver_id,
     imageId: item.image_id || undefined,
+    isSuperAdmin,
     name: item.user_name || "Unknown User",
     subtitle: previewMessage,
     avatar: image,
@@ -226,6 +500,90 @@ const buildConversationFromApi = (item: ChatListItem): Conversation => {
     unread: item.unread_count > 0,
     messages: [],
   };
+};
+
+const buildMessagePreview = (text: string, fileName?: string) => {
+  const trimmed = text.trim();
+  if (fileName && (!trimmed || isAttachmentPlaceholderText(trimmed))) {
+    return `Attachment: ${fileName}`;
+  }
+
+  if (isAttachmentPlaceholderText(trimmed)) {
+    return "Attachment";
+  }
+
+  return trimmed || "No messages yet";
+};
+
+const isAttachmentPlaceholderText = (value: string) =>
+  /^sent\s+an\s+attachment[.!]?$/i.test(value.trim());
+
+const shouldHideMessageText = (message: Message) =>
+  isAttachmentPlaceholderText(message.text);
+
+const hasVisibleMessageText = (message: Message) =>
+  !!message.text.trim() && !shouldHideMessageText(message);
+
+const isImageOnlyMessage = (message: Message) =>
+  !!message.fileUrl && isImageAttachment(message) && !hasVisibleMessageText(message);
+
+const isLocalOptimisticMessage = (message: Message) =>
+  message.id.startsWith("local-") && !!message.fileUrl;
+
+const mergeMessagesById = (incoming: Message[], existing: Message[]) => {
+  const merged = [...incoming];
+
+  for (const message of existing) {
+    if (!isLocalOptimisticMessage(message)) {
+      continue;
+    }
+
+    const matchingServerMessage = merged.find(
+      (item) =>
+        item.from === message.from &&
+        item.time === message.time &&
+        item.fileName === message.fileName &&
+        item.text === message.text
+    );
+
+    if (!matchingServerMessage || !matchingServerMessage.fileUrl) {
+      merged.push(message);
+    }
+  }
+
+  return merged;
+};
+
+const IMAGE_FILE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "heic",
+  "heif",
+  "avif",
+]);
+
+const getFileExtension = (value?: string) => {
+  if (!value) return "";
+  const clean = value.split("?")[0].split("#")[0];
+  const parts = clean.split(".");
+  if (parts.length < 2) return "";
+  return parts[parts.length - 1].toLowerCase();
+};
+
+const isImageAttachment = (message: Message) => {
+  const type = (message.fileType || "").toLowerCase();
+  if (type.startsWith("image/")) {
+    return true;
+  }
+
+  const extension =
+    getFileExtension(message.fileName) || getFileExtension(message.fileUrl);
+  return IMAGE_FILE_EXTENSIONS.has(extension);
 };
 
 export default function MessagesClient() {
@@ -247,30 +605,91 @@ export default function MessagesClient() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [messagesError, setMessagesError] = useState("");
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFilePreviewUrl, setSelectedFilePreviewUrl] = useState("");
+  const [failedImageMessageIds, setFailedImageMessageIds] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!selectedFile || !selectedFile.type.startsWith("image/")) {
+      setSelectedFilePreviewUrl("");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(selectedFile);
+    setSelectedFilePreviewUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedFile]);
+
+  useChatListener<RealtimeEvent>({
+    token: hydrated ? token : null,
+    channelName: "chat-conversation",
+    eventName: "ChatEvent",
+    enabled: hydrated && !!token,
+    isPrivate: true,
+    onMessage: (event) => {
+      const parsed = parseRealtimeEvent(event, authUser?.id);
+      if (!parsed) {
+        return;
+      }
+
+      setConversationState((prev) =>
+        prev.map((conv) => {
+          const matchByConversationId =
+            !!parsed.conversationId &&
+            (conv.id === parsed.conversationId ||
+              conv.conversationId === parsed.conversationId);
+          const matchByChatId =
+            typeof parsed.chatId === "number" && conv.chatId === parsed.chatId;
+          const isTargetConversation =
+            matchByConversationId ||
+            matchByChatId ||
+            (!parsed.conversationId && typeof parsed.chatId !== "number" && conv.id === activeId);
+
+          if (!isTargetConversation) {
+            return conv;
+          }
+
+          const alreadyExists = conv.messages.some(
+            (m) => m.id === parsed.message.id || (m.text === parsed.message.text && m.time === parsed.message.time)
+          );
+
+          if (alreadyExists) {
+            return conv;
+          }
+
+          const isActiveConversation = conv.id === activeId;
+
+          return {
+            ...conv,
+            messages: [...conv.messages, parsed.message],
+            subtitle: buildMessagePreview(parsed.message.text, parsed.message.fileName),
+            time: parsed.message.from === "me" ? "Now" : conv.time,
+            unread: parsed.message.from === "me" ? false : !isActiveConversation,
+          };
+        })
+      );
+    },
+  });
 
   const active = useMemo(() => {
     return conversationState.find((c) => c.id === activeId) || conversationState[0];
   }, [conversationState, activeId]);
 
-  useEffect(() => {
-    const unsub = useAuthStore.persist.onFinishHydration(() => {
-      setHydrated(true);
-    });
-    if (useAuthStore.persist.hasHydrated()) {
-      setHydrated(true);
-    }
-    return () => unsub();
-  }, []);
+  const fetchChatList = useCallback(
+    async (showLoader: boolean) => {
+      if (!hydrated) return;
+      if (!token) {
+        setListError("Please login to load chats.");
+        return;
+      }
 
-  useEffect(() => {
-    if (!hydrated) return;
-    if (!token) {
-      setListError("Please login to load chats.");
-      return;
-    }
-
-    const fetchChatList = async () => {
-      setIsLoadingList(true);
+      if (showLoader) {
+        setIsLoadingList(true);
+      }
       setListError("");
 
       try {
@@ -289,20 +708,152 @@ export default function MessagesClient() {
         }
 
         const mappedConversations = (result.data || []).map(buildConversationFromApi);
-        setConversationState(mappedConversations);
+        const superAdminConversations = mappedConversations.filter(
+          (conv) => conv.isSuperAdmin
+        );
 
-        if (mappedConversations.length > 0) {
-          setActiveId(mappedConversations[0].id);
+        const fallbackAdminConversation = mappedConversations.find((conv) =>
+          conv.name.toLowerCase().includes("admin")
+        );
+
+        const finalConversations =
+          superAdminConversations.length > 0
+            ? superAdminConversations
+            : fallbackAdminConversation
+              ? [{ ...fallbackAdminConversation, isSuperAdmin: true }]
+              : [];
+
+        setConversationState((prev) =>
+          finalConversations.map((conv) => {
+            const existing = prev.find((item) => item.id === conv.id);
+            if (!existing) {
+              return conv;
+            }
+
+            const latestExisting = existing.messages[existing.messages.length - 1];
+
+            return {
+              ...conv,
+              messages: existing.messages,
+              subtitle: latestExisting
+                ? buildMessagePreview(latestExisting.text, latestExisting.fileName)
+                : conv.subtitle,
+            };
+          })
+        );
+
+        if (finalConversations.length > 0) {
+          setActiveId((prevActiveId) => {
+            const stillExists = finalConversations.some((conv) => conv.id === prevActiveId);
+            return stillExists ? prevActiveId : finalConversations[0].id;
+          });
+        } else {
+          setActiveId("");
+          setListError(SUPER_ADMIN_ONLY_MESSAGE);
         }
       } catch (error) {
         setListError(error instanceof Error ? error.message : "Failed to load chat list.");
       } finally {
-        setIsLoadingList(false);
+        if (showLoader) {
+          setIsLoadingList(false);
+        }
       }
-    };
+    },
+    [hydrated, token]
+  );
 
-    void fetchChatList();
-  }, [hydrated, token]);
+  const fetchConversationMessages = useCallback(
+    async (conversationId: string, receiverId?: number, showLoader = false) => {
+      if (!hydrated || !token || !conversationId) return;
+
+      if (showLoader) {
+        setIsLoadingMessages(true);
+      }
+      setMessagesError("");
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/chat/get/${conversationId}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const result: GetConversationResponse = await response.json();
+        if (!response.ok || !result.status) {
+          throw new Error("Failed to load conversation messages.");
+        }
+
+        const mappedMessages = Array.isArray(result.data)
+          ? result.data.map((item, idx) =>
+            mapApiMessageToUi(item, idx, authUser?.id, receiverId)
+          )
+          : [];
+
+        setConversationState((prev) =>
+          prev.map((conv) =>
+            conv.id === conversationId
+              ? {
+                ...conv,
+                messages: mergeMessagesById(mappedMessages, conv.messages),
+                subtitle: buildMessagePreview(
+                  mergeMessagesById(mappedMessages, conv.messages)[
+                    mergeMessagesById(mappedMessages, conv.messages).length - 1
+                  ]?.text || conv.subtitle,
+                  mergeMessagesById(mappedMessages, conv.messages)[
+                    mergeMessagesById(mappedMessages, conv.messages).length - 1
+                  ]?.fileName
+                ),
+              }
+              : conv
+          )
+        );
+      } catch (error) {
+        if (showLoader) {
+          setMessagesError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load conversation messages."
+          );
+        }
+      } finally {
+        if (showLoader) {
+          setIsLoadingMessages(false);
+        }
+      }
+    },
+    [authUser?.id, hydrated, token]
+  );
+
+  useEffect(() => {
+    const unsub = useAuthStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true);
+    }
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    void fetchChatList(true);
+  }, [fetchChatList]);
+
+  useEffect(() => {
+    if (!hydrated || !token) return;
+
+    const pollListId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void fetchChatList(false);
+      }
+    }, CHAT_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(pollListId);
+    };
+  }, [fetchChatList, hydrated, token]);
 
   const markConversationAsRead = async (conversationId: string) => {
     const target = conversationState.find((conv) => conv.id === conversationId);
@@ -338,6 +889,12 @@ export default function MessagesClient() {
   };
 
   const handleSelect = (id: string) => {
+    const targetConversation = conversationState.find((conv) => conv.id === id);
+    if (!targetConversation?.isSuperAdmin) {
+      setSendError(SUPER_ADMIN_ONLY_MESSAGE);
+      return;
+    }
+
     setActiveId(id);
     setSendError("");
     setSendInfo("");
@@ -358,56 +915,18 @@ export default function MessagesClient() {
     if (!token) return;
     if (!active?.id) return;
 
-    const fetchConversationMessages = async () => {
-      setIsLoadingMessages(true);
-      setMessagesError("");
+    void fetchConversationMessages(active.id, active.receiverId, true);
 
-      try {
-        const response = await fetch(`${API_BASE_URL}/chat/get/${active.id}`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        const result: GetConversationResponse = await response.json();
-        if (!response.ok || !result.status) {
-          throw new Error("Failed to load conversation messages.");
-        }
-
-        const mappedMessages = Array.isArray(result.data)
-          ? result.data.map((item, idx) =>
-              mapApiMessageToUi(item, idx, authUser?.id, active?.receiverId)
-            )
-          : [];
-
-        setConversationState((prev) =>
-          prev.map((conv) =>
-            conv.id === active.id
-              ? {
-                  ...conv,
-                  messages: mappedMessages,
-                  subtitle:
-                    mappedMessages[mappedMessages.length - 1]?.text || conv.subtitle,
-                }
-              : conv
-          )
-        );
-      } catch (error) {
-        setMessagesError(
-          error instanceof Error
-            ? error.message
-            : "Failed to load conversation messages."
-        );
-      } finally {
-        setIsLoadingMessages(false);
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void fetchConversationMessages(active.id, active.receiverId, false);
       }
-    };
+    }, CHAT_POLL_INTERVAL_MS);
 
-    void fetchConversationMessages();
-  }, [active?.id, active?.receiverId, authUser?.id, hydrated, token]);
+    return () => {
+      window.clearInterval(pollId);
+    };
+  }, [active?.id, active?.receiverId, fetchConversationMessages, hydrated, token]);
 
   const extractErrorMessage = (result: SendChatResponse) => {
     if (Array.isArray(result.message) && result.message.length > 0) {
@@ -418,6 +937,16 @@ export default function MessagesClient() {
     }
     if (typeof result.data === "string" && result.data.trim()) {
       return result.data;
+    }
+    if (result.data && typeof result.data === "object") {
+      const dataRecord = result.data as Record<string, unknown>;
+      const maybeErrors = dataRecord.errors;
+      if (maybeErrors && typeof maybeErrors === "object") {
+        const firstError = Object.values(maybeErrors as Record<string, unknown>)[0];
+        if (Array.isArray(firstError) && firstError.length > 0) {
+          return String(firstError[0]);
+        }
+      }
     }
     return "Failed to send message. Please try again.";
   };
@@ -457,14 +986,17 @@ export default function MessagesClient() {
     return "Failed to delete chat image. Please try again.";
   };
 
-  const appendMyMessage = (text: string) => {
+  const appendMyMessage = (text: string, file?: File) => {
     const now = new Date();
     const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const newMessage: Message = {
       id: `local-${Date.now()}`,
       from: "me",
-      text,
+      text: text || (file ? "Sent an attachment" : ""),
       time,
+      fileUrl: file ? URL.createObjectURL(file) : undefined,
+      fileName: file?.name,
+      fileType: file?.type,
     };
 
     setConversationState((prev) =>
@@ -472,7 +1004,7 @@ export default function MessagesClient() {
         if (conv.id !== activeId) return conv;
         return {
           ...conv,
-          subtitle: text,
+          subtitle: buildMessagePreview(newMessage.text, newMessage.fileName),
           time: "Now",
           messages: [...conv.messages, newMessage],
         };
@@ -482,17 +1014,96 @@ export default function MessagesClient() {
     return newMessage;
   };
 
+  const messageFromSendResult = (
+    resultData: unknown,
+    fallbackText: string,
+    file?: File
+  ): Message | null => {
+    if (!resultData || typeof resultData !== "object") {
+      return null;
+    }
+
+    const parsedMessage = mapApiMessageToUi(
+      resultData,
+      0,
+      authUser?.id,
+      active?.receiverId
+    );
+    const directRecord = coerceRecord(resultData);
+    const directImageUrl =
+      readFileLikeValue(directRecord, [
+        "image_url",
+        "file_url",
+        "chat_image",
+        "chatimage",
+        "attachment",
+        "file",
+        "document_url",
+      ]) ||
+      readFileLikeValue(coerceRecord(directRecord.chatimage), [
+        "image",
+        "url",
+        "path",
+        "file_url",
+      ]);
+    const directFileName =
+      readString(directRecord, ["file_name", "attachment_name", "image_name"]) ||
+      readString(coerceRecord(directRecord.chatimage), ["image_name", "file_name"]) ||
+      (directImageUrl ? directImageUrl.split("/").pop() : undefined);
+    const directFileType = readString(directRecord, ["file_type", "mime_type", "content_type"]);
+
+    return {
+      ...parsedMessage,
+      from: "me",
+      text: parsedMessage.text || fallbackText || (file ? "Sent an attachment" : ""),
+      fileUrl: parsedMessage.fileUrl || directImageUrl || (file ? URL.createObjectURL(file) : undefined),
+      fileName:
+        parsedMessage.fileName ||
+        directFileName ||
+        file?.name ||
+        (parsedMessage.fileUrl ? parsedMessage.fileUrl.split("/").pop() : undefined),
+      fileType: parsedMessage.fileType || directFileType || file?.type,
+    };
+  };
+
+  const clearSelectedFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const markImagePreviewFailed = (messageId: string) => {
+    setFailedImageMessageIds((prev) => {
+      if (prev.includes(messageId)) {
+        return prev;
+      }
+      return [...prev, messageId];
+    });
+  };
+
   const handleSendMessage = async () => {
     const message = input.trim();
-    if (!message || isSending) return;
+    const messageForPayload = message || (selectedFile ? "Sent an attachment" : "");
+    if ((!message && !selectedFile) || isSending) return;
 
     if (!active) {
       setSendError("No chat selected.");
       return;
     }
 
+    if (!active.isSuperAdmin) {
+      setSendError(SUPER_ADMIN_ONLY_MESSAGE);
+      return;
+    }
+
     if (!hydrated || !token) {
       setSendError("Please login to send messages.");
+      return;
+    }
+
+    if (selectedFile && selectedFile.size > MAX_CHAT_FILE_SIZE) {
+      setSendError("File size must be 10MB or less.");
       return;
     }
 
@@ -504,22 +1115,47 @@ export default function MessagesClient() {
       const payload: Record<string, unknown> = {
         chat_id: active?.chatId || activeId,
         conversation_id: active?.conversationId || activeId,
-        message,
+        message: messageForPayload,
       };
 
       if (typeof active?.receiverId === "number") {
         payload.receiver_id = active.receiverId;
       }
 
-      const response = await fetch(`${API_BASE_URL}/chat/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      let response: Response;
+
+      if (selectedFile) {
+        const formData = new FormData();
+        Object.entries(payload).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            formData.append(key, String(value));
+          }
+        });
+
+        formData.append("chat_image", selectedFile);
+        formData.append("image", selectedFile);
+        formData.append("attachment", selectedFile);
+        formData.append("file", selectedFile);
+
+        response = await fetch(`${API_BASE_URL}/chat/send`, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+      } else {
+        response = await fetch(`${API_BASE_URL}/chat/send`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      }
 
       const result: SendChatResponse = await response.json();
 
@@ -527,17 +1163,57 @@ export default function MessagesClient() {
         const backendMessage = extractErrorMessage(result);
 
         if (isPusherBroadcastError(backendMessage)) {
-          appendMyMessage(message);
+          appendMyMessage(messageForPayload, selectedFile || undefined);
           setInput("");
+          clearSelectedFile();
           setSendInfo("Message submitted, but real-time delivery is unavailable right now.");
+          void fetchConversationMessages(active.id, active.receiverId, false);
+          void fetchChatList(false);
           return;
         }
 
         throw new Error(backendMessage);
       }
 
-      appendMyMessage(message);
+      const serverMessage = messageFromSendResult(
+        result.data,
+        messageForPayload,
+        selectedFile || undefined
+      );
+
+      if (serverMessage) {
+        setConversationState((prev) =>
+          prev.map((conv) => {
+            if (conv.id !== activeId) return conv;
+            const alreadyExists = conv.messages.some(
+              (item) =>
+                item.id === serverMessage.id ||
+                (serverMessage.fileUrl && item.fileUrl === serverMessage.fileUrl)
+            );
+
+            if (alreadyExists) {
+              return {
+                ...conv,
+                subtitle: buildMessagePreview(serverMessage.text, serverMessage.fileName),
+                time: "Now",
+              };
+            }
+
+            return {
+              ...conv,
+              subtitle: buildMessagePreview(serverMessage.text, serverMessage.fileName),
+              time: "Now",
+              messages: [...conv.messages, serverMessage],
+            };
+          })
+        );
+      } else {
+        appendMyMessage(messageForPayload, selectedFile || undefined);
+      }
       setInput("");
+      clearSelectedFile();
+      void fetchConversationMessages(active.id, active.receiverId, false);
+      void fetchChatList(false);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to send message.";
@@ -545,6 +1221,11 @@ export default function MessagesClient() {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleSelectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setSelectedFile(file);
   };
 
   const handleDeleteChat = async () => {
@@ -690,7 +1371,7 @@ export default function MessagesClient() {
         <div className="p-3 border-b border-gray-100">
           <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
             </svg>
             <input
               type="text"
@@ -770,7 +1451,7 @@ export default function MessagesClient() {
             onClick={() => setMobileView("list")}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 12H5M12 5l-7 7 7 7"/>
+              <path d="M19 12H5M12 5l-7 7 7 7" />
             </svg>
           </button>
 
@@ -857,13 +1538,59 @@ export default function MessagesClient() {
               >
                 <div
                   className={clsx(
-                    "max-w-[70%] px-4 py-3 rounded-2xl text-sm leading-relaxed",
-                    msg.from === "me"
+                    "max-w-[70%] text-sm leading-relaxed",
+                    isImageOnlyMessage(msg)
+                      ? "rounded-[28px] bg-[#FDECEC] p-2 shadow-sm"
+                      : "px-4 py-3 rounded-2xl",
+                    !isImageOnlyMessage(msg) &&
+                    (msg.from === "me"
                       ? "bg-[#D93E39] text-white rounded-br-sm"
-                      : "bg-red-50 text-gray-700 rounded-bl-sm"
+                      : "bg-red-50 text-gray-700 rounded-bl-sm")
                   )}
                 >
-                  {msg.text}
+                  {hasVisibleMessageText(msg) && <p>{msg.text}</p>}
+                  {msg.fileUrl &&
+                    isImageAttachment(msg) &&
+                    !failedImageMessageIds.includes(msg.id) && (
+                      <a
+                        href={msg.fileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={clsx(
+                          "block overflow-hidden",
+                          isImageOnlyMessage(msg) ? "rounded-[22px]" : "mt-2 rounded-xl"
+                        )}
+                      >
+                        <img
+                          src={msg.fileUrl}
+                          alt={msg.fileName || "Attachment image"}
+                          className={clsx(
+                            "w-full object-cover",
+                            isImageOnlyMessage(msg)
+                              ? "max-h-80 min-h-55 min-w-55"
+                              : "max-h-64 max-w-70 rounded-xl"
+                          )}
+                          onError={() => markImagePreviewFailed(msg.id)}
+                        />
+                      </a>
+                    )}
+                  {msg.fileUrl &&
+                    (!isImageAttachment(msg) || failedImageMessageIds.includes(msg.id)) && (
+                      <a
+                        href={msg.fileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={clsx(
+                          "mt-2 inline-flex items-center underline break-all",
+                          msg.from === "me" ? "text-white" : "text-[#D93E39]"
+                        )}
+                      >
+                        {msg.fileName || (isImageAttachment(msg) ? "View image" : "View attachment")}
+                      </a>
+                    )}
+                  {!msg.fileUrl && msg.fileName && (
+                    <p className="mt-2 break-all opacity-90">{msg.fileName}</p>
+                  )}
                 </div>
               </div>
               <p
@@ -880,6 +1607,12 @@ export default function MessagesClient() {
 
         {/* Input */}
         <div className="px-4 py-4 border-t border-[#D93E39] bg-[#FDECEC]">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleSelectFile}
+          />
           <div className="flex items-center gap-2 border border-[#D93E39] rounded-2xl px-4 py-2.5 bg-[#FDECEC]">
             <input
               type="text"
@@ -890,17 +1623,42 @@ export default function MessagesClient() {
               disabled={isSending}
               className="flex-1 text-sm text-gray-700 placeholder-gray-400 outline-none bg-transparent"
             />
-            <button className="text-gray-400 cursor-pointer hover:text-gray-600 transition-colors p-1">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="text-gray-400 cursor-pointer hover:text-gray-600 transition-colors p-1"
+            >
               <Paperclip size={16} />
             </button>
             <button
               onClick={handleSendMessage}
-              disabled={isSending || !input.trim()}
+              disabled={isSending || (!input.trim() && !selectedFile)}
               className="w-8 h-8 bg-[#D93E39] cursor-pointer rounded-xl flex items-center justify-center transition-colors shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Send size={14} className="text-white" />
             </button>
           </div>
+          {selectedFile && (
+            <div className="mt-2 flex items-center justify-between rounded-lg border border-[#D93E39]/30 bg-white px-3 py-2 text-xs text-gray-700">
+              <div className="min-w-0 flex-1">
+                {selectedFile.type.startsWith("image/") && selectedFilePreviewUrl && (
+                  <img
+                    src={selectedFilePreviewUrl}
+                    alt={selectedFile.name}
+                    className="mb-2 h-20 w-20 rounded-lg object-cover"
+                  />
+                )}
+                <span className="truncate block">Attachment: {selectedFile.name}</span>
+              </div>
+              <button
+                type="button"
+                onClick={clearSelectedFile}
+                className="ml-3 text-[#D93E39] cursor-pointer"
+              >
+                Remove
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -89,7 +89,7 @@ export default function MyBidsClient() {
       setIsLoading(true);
       setError("");
       try {
-        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL_DEAL || "";
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
         const response = await fetch(`${API_BASE_URL}/vehicle/my/bids`, {
           method: "GET",
           headers: {

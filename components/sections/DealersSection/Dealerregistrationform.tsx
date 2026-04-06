@@ -28,6 +28,11 @@ type MileagePreference = {
   mileage: string;
 };
 
+type TitleSituation = {
+  id: number;
+  titleSituation: string;
+};
+
 type FormData = {
   dealershipName: string;
   contactName: string;
@@ -46,13 +51,6 @@ type FormData = {
   additionalNotes: string;
 };
 
-const titleToleranceOptions = [
-  { id: 1, label: "Clean Only" },
-  { id: 2, label: "Clean or Salvage" },
-  { id: 3, label: "Any Title" },
-  { id: 4, label: "Rebuilt Accepted" },
-];
-
 export default function DealerRegistrationForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -65,13 +63,15 @@ export default function DealerRegistrationForm() {
   const [buyingVolumesLoading, setBuyingVolumesLoading] = useState(true);
   const [mileagePreferences, setMileagePreferences] = useState<MileagePreference[]>([]);
   const [mileagePreferencesLoading, setMileagePreferencesLoading] = useState(true);
+  const [titleSituations, setTitleSituations] = useState<TitleSituation[]>([]);
+  const [titleSituationsLoading, setTitleSituationsLoading] = useState(true);
 
   // Fetch all dropdown data from API
   useEffect(() => {
     const fetchCategories = async () => {
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/category`
+          `${process.env.NEXT_PUBLIC_API_URL}/dealer/vehicle/category`
         );
         const result = await response.json();
         if (result.success && Array.isArray(result.data)) {
@@ -87,7 +87,7 @@ export default function DealerRegistrationForm() {
     const fetchPriceRanges = async () => {
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/pricerange`
+          `${process.env.NEXT_PUBLIC_API_URL}/dealer/vehicle/pricerange`
         );
         const result = await response.json();
         if (result.success && Array.isArray(result.data)) {
@@ -103,7 +103,7 @@ export default function DealerRegistrationForm() {
     const fetchBuyingVolumes = async () => {
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/buyingvolume`
+          `${process.env.NEXT_PUBLIC_API_URL}/dealer/vehicle/buyingvolume`
         );
         const result = await response.json();
         if (result.success && Array.isArray(result.data)) {
@@ -119,7 +119,7 @@ export default function DealerRegistrationForm() {
     const fetchMileagePreferences = async () => {
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/vehicle/mileagepreference`
+          `${process.env.NEXT_PUBLIC_API_URL}/dealer/vehicle/mileagepreference`
         );
         const result = await response.json();
         if (result.success && Array.isArray(result.data)) {
@@ -132,10 +132,25 @@ export default function DealerRegistrationForm() {
       }
     };
 
+    const fetchTitleSituations = async () => {
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/TitleData/get`);
+        const result = await response.json();
+        if (result.status && Array.isArray(result.data)) {
+          setTitleSituations(result.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch title situations:", error);
+      } finally {
+        setTitleSituationsLoading(false);
+      }
+    };
+
     fetchCategories();
     fetchPriceRanges();
     fetchBuyingVolumes();
     fetchMileagePreferences();
+    fetchTitleSituations();
   }, []);
 
   // Helper to format price range label
@@ -167,7 +182,7 @@ export default function DealerRegistrationForm() {
       vehicleCategories: [],
       priceRange: "",
       mileagePreference: "",
-      titleTolerance: "1",
+      titleTolerance: "",
       buyingVolume: "",
     },
   });
@@ -191,6 +206,37 @@ export default function DealerRegistrationForm() {
     }
   }, [buyingVolumes, setValue]);
 
+  useEffect(() => {
+    if (titleSituations.length > 0) {
+      setValue("titleTolerance", String(titleSituations[0].id));
+    }
+  }, [titleSituations, setValue]);
+
+  const extractApiError = (result: unknown) => {
+    const fallback = "Submission failed. Please try again.";
+    if (!result || typeof result !== "object") {
+      return fallback;
+    }
+
+    const record = result as {
+      message?: string | number;
+      errors?: Record<string, string[]>;
+    };
+
+    if (record.errors && typeof record.errors === "object") {
+      const firstErrorGroup = Object.values(record.errors)[0];
+      if (Array.isArray(firstErrorGroup) && firstErrorGroup.length > 0) {
+        return firstErrorGroup[0];
+      }
+    }
+
+    if (typeof record.message === "string" && record.message.trim()) {
+      return record.message;
+    }
+
+    return fallback;
+  };
+
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     setSubmitError(null);
@@ -208,17 +254,15 @@ export default function DealerRegistrationForm() {
         best_contact_method: data.bestContactMethod,
         additional_notes: data.additionalNotes || null,
         license_number: data.licenseNumber,
-        price_range_id: parseInt(data.priceRange),
-        buying_volume_id: parseInt(data.buyingVolume),
-        mileage_preference_id: parseInt(data.mileagePreference),
-        title_situation_id: parseInt(data.titleTolerance),
+        price_range_id: Number(data.priceRange),
+        buying_volume_id: Number(data.buyingVolume),
+        mileage_preference_id: Number(data.mileagePreference),
+        title_situation_id: Number(data.titleTolerance),
         categories: data.vehicleCategories,
       };
 
-      console.log("Submitting payload:", payload);
-
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL_DEAL}/dealer/info/store`,
+        `${process.env.NEXT_PUBLIC_API_URL}/dealer/info/store`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -229,7 +273,7 @@ export default function DealerRegistrationForm() {
       const result = await response.json();
 
       if (!response.ok || !result.status) {
-        throw new Error(result?.message || "Submission failed. Please try again.");
+        throw new Error(extractApiError(result));
       }
 
       reset();
@@ -590,10 +634,17 @@ export default function DealerRegistrationForm() {
               <select
                 {...register("titleTolerance")}
                 className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-400 transition appearance-none cursor-pointer"
+                disabled={titleSituationsLoading}
               >
-                {titleToleranceOptions.map((opt) => (
-                  <option key={opt.id} value={opt.id}>{opt.label}</option>
-                ))}
+                {titleSituationsLoading ? (
+                  <option value="">Loading...</option>
+                ) : titleSituations.length === 0 ? (
+                  <option value="">No options available</option>
+                ) : (
+                  titleSituations.map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.titleSituation}</option>
+                  ))
+                )}
               </select>
             </div>
             <div>

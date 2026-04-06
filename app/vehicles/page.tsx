@@ -52,8 +52,8 @@ const VehiclesPage = () => {
   const token = useAuthStore((state) => state.token);
 
   const API_BASE_URL =
-    process.env.NEXT_PUBLIC_API_URL_DEAL ||
-    "https://secondbackend.vintocash.com/api";
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://backend.vintocash.com/api";
 
   // useEffect(() => {
   //   // Wait for token to load from localStorage

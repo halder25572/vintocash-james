@@ -30,8 +30,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   const API_BASE_URL =
-    process.env.NEXT_PUBLIC_API_URL_DEAL ||
-    "https://secondbackend.vintocash.com/api";
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://backend.vintocash.com/api";
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
